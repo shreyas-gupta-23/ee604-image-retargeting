@@ -1,0 +1,5 @@
+lines=Johanneskirche
+saliency=obama
+failure=Sanfrancisco
+height=waterfall
+enlarge=butterfly

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+experiments/retargetme_source.zip
+cvpr-kit.zip
+paper/_kit_main.tex
+paper/_kit_preamble.tex
+paper/*.aux
+paper/*.bbl
+paper/*.blg
+paper/*.log
+paper/*.out

@@ -1,0 +1,17 @@
+setting,method,n,mean_saliency_removed,mean_line_crossings_per_100,mean_runtime_s,all_sizes_ok
+enlarge_150,ours,1,0.000000,0.1691,28.0513,1
+enlarge_150,scale,1,nan,nan,0.0008,1
+height_75,classic,1,0.016426,0.0000,11.1781,1
+height_75,ours,1,0.009308,0.0000,13.8236,1
+height_75,scale,1,nan,nan,0.0012,1
+width_50,classic,8,0.221535,1.6134,21.5465,1
+width_50,crop,8,nan,nan,0.0006,1
+width_50,ours,8,0.185563,0.6857,26.0271,1
+width_50,scale,8,nan,nan,0.0026,1
+width_75,classic,8,0.089167,1.2977,10.9717,1
+width_75,crop,8,nan,nan,0.0003,1
+width_75,forward,8,0.088682,1.1421,13.6882,1
+width_75,forward_lines,8,0.088511,0.3100,13.3668,1
+width_75,forward_saliency,8,0.067865,0.9894,12.9340,1
+width_75,ours,8,0.068485,0.3666,14.3990,1
+width_75,scale,8,nan,nan,0.0012,1

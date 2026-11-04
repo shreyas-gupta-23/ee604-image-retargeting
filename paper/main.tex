@@ -1,0 +1,519 @@
+% EE604 course project. Camera-ready CVPR format: authors are visible,
+% and the review ruler is off.
+
+\documentclass[10pt,twocolumn,letterpaper]{article}
+
+\usepackage[pagenumbers]{cvpr}
+\input{preamble}
+
+\definecolor{cvprblue}{rgb}{0.21,0.49,0.74}
+\usepackage[pagebackref,breaklinks,colorlinks,allcolors=cvprblue]{hyperref}
+
+\def\confName{CVPR}
+\def\confYear{2026}
+
+\title{Orientation-Aware Seam Carving for Image Retargeting}
+
+\author{Shreyas Gupta\\
+230991\\
+EE604, Department of Electrical Engineering\\
+Indian Institute of Technology Kanpur
+}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Image retargeting changes the height and width of a photograph so that it fits a new layout while the objects a viewer would notice, and the long straight structures in the scene, stay intact.
+Uniform scaling compresses the whole frame, and a center crop throws away everything outside a window.
+This project instead deletes or duplicates low-cost seams.
+The seam cost is the forward energy of Rubinstein, Shamir, and Avidan, which charges the new edges a deletion would create, plus two maps that use no learned weights: spectral-residual saliency, and a line map whose weight depends on the direction of the seam.
+Vertical seams are discouraged from cutting vertical structures, and horizontal seams from cutting horizontal ones.
+On eight images from the RetargetMe benchmark, the combined cost is compared with scaling, center-cropping, classic backward-energy seams, and ablations that turn saliency or lines off.
+Against forward energy alone, on eight images at a 25\% width reduction, the saliency weight lowers the mean deleted spectral-residual fraction from 0.089 to 0.068, and the line weight lowers crossings of the same line map from 1.14 to 0.31 per 100 seam pixels.
+The full model matches the saliency-only score and sits a little above the lines-only score, at 0.37 rather than 0.31.
+Both scores reuse the maps inside the cost, so they show that the weights move the seams.
+They are not an independent measure of whether the picture looks better.
+At 75\% width the two seam results look similar.
+A center crop already removes off-center content, and a 50\% cut of a curved sculpture pinches it under both seam methods.
+A hybrid schedule uses the same cost but stops the seams at 75\% of the original side and scales the rest.
+The 50\% result is then the 75\% seam image scaled down.
+It does not add the further pinching that comes from carving all the way to half width, and it still does not match uniform scaling, which never cuts the sculpture.
+\end{abstract}
+
+\section{Introduction}
+Photographs are displayed at aspect ratios their cameras did not use: a phone story, a banner, a slide, a print.
+The operation that produces the new size is image retargeting.
+Its input is one color image, a target height, and a target width.
+Its output is an image of that exact size.
+The constraint in this project is that the computation stays in the spatial domain.
+There is no trained retargeting network and no learned saliency model.
+The implementation uses NumPy and OpenCV, and the dynamic program runs on images whose long side is at most 640 pixels so that a demo can recompute a result on request.
+
+Two standard operators ignore content.
+Scaling moves every pixel by the same factor, so a face becomes thinner when the frame becomes narrower.
+Cropping keeps a window and discards the rest, so an off-center subject can disappear even though the remaining pixels look sharp.
+Seam carving~\cite{avidan2007seam} takes a third route.
+A vertical seam is an 8-connected path of one pixel per row.
+Deleting the cheapest such paths changes the width without a global resample.
+The original cost is a backward energy: the gradient magnitude of the pixels that are removed.
+That cost does not look at the tear those pixels leave behind, and a smooth subject can be cheaper to cut than a textured background.
+
+Forward energy~\cite{rubinstein2008improved} fixes the tear by scoring the edges that appear after the deletion.
+It still has no notion of a person or of a window mullion.
+Saliency raises the cost of pixels that the spectral residual marks. Those pixels are often edges, not a detected person.
+A line map raises the cost of long straight segments.
+Both ideas exist in the literature as separate add-ons.
+The variant defended here puts them in one recurrence, and it does not treat every line the same way.
+A vertical seam is allowed to cross a horizon, because every vertical seam must, and it is penalized for crossing a column or a mullion.
+A horizontal seam swaps that preference.
+Section~\ref{sec:method} defines the cost.
+Section~\ref{sec:exp} compares it with scaling, cropping, and classic seams, and turns each extra term off in an ablation.
+
+\section{Related work}
+Avidan and Shamir~\cite{avidan2007seam} select seams by dynamic programming on an energy map, remove them to shrink, and duplicate them to enlarge.
+The energy they use is a function of the image gradient.
+Rubinstein, Shamir, and Avidan~\cite{rubinstein2008improved} replace that energy with a forward cost that depends on which neighbor the seam arrives from, because the pixels that become adjacent are not known from the gradient alone.
+The same authors later choose among scaling, cropping, and seam carving with a multi-operator search~\cite{rubinstein2009multi}.
+We do not search over operators.
+Scaling and cropping are baselines, and the seam operator is fixed.
+
+Hou and Zhang~\cite{hou2007saliency} define a saliency map from the spectral residual of the Fourier amplitude.
+The residual is the log amplitude minus a local average of the log amplitude, combined with the original phase.
+The map needs no training images.
+RetargetMe~\cite{rubinstein2010comparative} is the public benchmark used below.
+It compares several retargeting operators with a user study.
+We report automatic scores and side-by-side figures on a subset of its source images, and we do not repeat that user study.
+
+\section{Method}
+\label{sec:method}
+
+Figure~\ref{fig:overview} is the pipeline.
+Luminance is computed once per seam from the current color image.
+Saliency and the two line maps are computed once on the image at the start of a shrinking or enlarging stage.
+When a seam is deleted, the same pixel indices are deleted from those maps.
+Forward energy is not stored.
+It is recomputed from the current luminance inside the dynamic program, because it depends on the neighbors that still exist.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  font=\small,
+  box/.style={draw, rounded corners=2pt, align=center, inner sep=3pt, minimum width=22mm},
+  arr/.style={-{Stealth[length=2mm]}, thick}
+]
+\node[box] (in) {Input image};
+\node[box, below=3mm of in] (y) {Luminance};
+\node[box, below left=4mm and 2mm of y] (sal) {Spectral\\residual};
+\node[box, below=4mm of y] (fwd) {Forward\\energy};
+\node[box, below right=4mm and 2mm of y] (lin) {Oriented\\lines};
+\node[box, below=8mm of fwd] (dp) {Dynamic program};
+\node[box, below=3mm of dp] (out) {Remove or insert\\until target size};
+\draw[arr] (in) -- (y);
+\draw[arr] (y) -- (sal);
+\draw[arr] (y) -- (fwd);
+\draw[arr] (y) -- (lin);
+\draw[arr] (sal) -- (dp);
+\draw[arr] (fwd) -- (dp);
+\draw[arr] (lin) -- (dp);
+\draw[arr] (dp) -- (out);
+\end{tikzpicture}
+\caption{Overview. Forward energy is evaluated on the current luminance. Saliency and the line maps travel with the pixels as seams are removed.}
+\label{fig:overview}
+\end{figure}
+
+\subsection{Saliency and line protection}
+Luminance is the Rec.\ 601 combination $Y = 0.299R + 0.587G + 0.114B$, scaled to $[0,1]$.
+Spectral residual saliency follows Hou and Zhang.
+The log amplitude of the Fourier transform is subtracted from its $3\times 3$ local average, the original phase is kept, and the inverse transform is squared, blurred with a Gaussian of standard deviation 2.5, and normalized to $[0,1]$.
+
+Line segments come from a blurred Canny edge map and the probabilistic Hough transform.
+The blur (a $5\times 5$ Gaussian with $\sigma = 1.2$) and the Canny thresholds (80 and 160) are there so that brick texture does not fill the mask.
+A segment is kept only when it is at least 30 pixels long and at least 12\% of the short side.
+At most 40 of the longest segments are drawn, with thickness 2.
+Let $\theta$ be the segment angle from the $x$-axis.
+For a vertical seam, which changes the width, the segment is drawn with weight $|\sin\theta|$.
+A vertical mullion then has weight 1, and a horizontal horizon has weight 0.
+For a horizontal seam the weight is $|\cos\theta|$.
+Overlapping draws keep the per-pixel maximum.
+The horizon still has to be crossed by every vertical seam.
+The weight stops that forced crossing from also penalizing columns and poles.
+
+\subsection{Dynamic program}
+Index rows by $i$ and columns by $j$, and write $I$ for the current luminance.
+The forward costs of arriving at $(i,j)$ from the three pixels in the row above are
+\begin{align}
+C_U(i,j) &= \lvert I(i,j{+}1) - I(i,j{-}1) \rvert, \label{eq:cu}\\
+C_L(i,j) &= C_U(i,j) + \lvert I(i{-}1,j) - I(i,j{-}1) \rvert, \label{eq:cl}\\
+C_R(i,j) &= C_U(i,j) + \lvert I(i{-}1,j) - I(i,j{+}1) \rvert. \label{eq:cr}
+\end{align}
+$C_U$ is the new edge between the left and right neighbors that the deletion joins.
+$C_L$ and $C_R$ add the edge against the pixel the seam just left when the step is diagonal.
+Out-of-range neighbors are clamped to the border pixel.
+A step that would leave the image is given infinite cost.
+The direction-independent term is the saliency $S$ and the line map $L_d$ for the seam direction $d$,
+\begin{equation}
+E(i,j) = w_s S(i,j) + w_l L_d(i,j).
+\label{eq:extra}
+\end{equation}
+The cumulative cost and the chosen step are
+\begin{equation}
+\begin{aligned}
+M(i,j) = E(i,j) + \min\big\{
+&M(i{-}1,j{-}1)+C_L,\\
+&M(i{-}1,j)+C_U,\\
+&M(i{-}1,j{+}1)+C_R
+\big\}.
+\end{aligned}
+\label{eq:dp}
+\end{equation}
+The first row is $M(0,j) = E(0,j)$.
+Backtracking from the minimum of the last row yields one column index per row.
+Consecutive indices differ by at most one, so the seam is 8-connected.
+The weights used for every reported number are $w_s = 0.5$ and $w_l = 0.8$.
+They were chosen by looking at Johanneskirche and \texttt{obama}, which are two of the eight evaluation images, and then frozen.
+There is no weight sweep.
+The demo sliders can still override them.
+Section~\ref{sec:exp} also reports the means with those two images removed, as a sensitivity check rather than a held-out tuning.
+
+Classic seam carving uses the same backtracking with a different recurrence.
+Its pixel cost is the sum of absolute Sobel responses, and it has no forward term and no saliency or line term.
+Horizontal seams are vertical seams on the transposed image, with the matching line map transposed as well.
+While both the height and the width are still above the target, the algorithm computes one seam in each direction and deletes the cheaper one.
+Enlargement records the seams that would be removed, maps their indices back onto the image before insertion, and writes an averaged copy of each seam pixel next to its right neighbor.
+One recording pass inserts at most $W-2$ seams, which can almost double the width.
+The $1.5\times$ enlargement in the experiments fits in that single pass.
+A second pass runs only when the target is wider than $2W-2$.
+
+\subsection{Hybrid schedule}
+The full model above carves until the image is the requested size.
+On a deep shrink that is where curved, busy scenes tear: each new seam is still the cheapest path, and after the easy background is gone the path goes through the object.
+The hybrid operator keeps Equation~\eqref{eq:dp} and the same weights, and changes only when scaling takes over.
+If a target side is at least 75\% of the original, hybrid is the full model and does not scale.
+If the target is smaller, seams stop at $\mathrm{round}(0.75 \times \text{original})$ and \texttt{cv2.resize} finishes that side.
+A request for 50\% width therefore deletes columns by seams until the width is 75\% of the original, then resizes that image to 50\%.
+Enlargement is unchanged.
+This is a fixed schedule, not a search over operators~\cite{rubinstein2009multi}.
+An edge-density term was tried as a way to protect curves and then left out of the cost.
+A vertical seam crosses a curved outline in a few rows and then travels through the smooth interior, so raising the outline moves the seam into that interior.
+On \texttt{Sanfrancisco} those paths go through the painted sky on the heart.
+The Hough line map is also unchanged.
+OpenCV's line-segment detector is present in this installation and was not substituted, so every line score in Section~\ref{sec:exp} still refers to one detector.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_maps.png}
+\caption{Maps on Johanneskirche, the line example. Left to right: the working image, spectral-residual saliency, the line map used by vertical seams (bright yellow marks near-vertical segments), and the next seam chosen by the full model.}
+\label{fig:maps}
+\end{figure*}
+
+\section{Experiments}
+\label{sec:exp}
+
+\subsection{Data and implementation}
+The images are eight source photographs from RetargetMe~\cite{rubinstein2010comparative}: \texttt{obama} and \texttt{child} (people), \texttt{brick\_house} and \texttt{Johanneskirche} (buildings), \texttt{eagle} and \texttt{butterfly} (compact objects), \texttt{waterfall} (a landscape), and \texttt{Sanfrancisco} (a busy outdoor scene).
+The download script keeps these eight files from the public source-image archive and does not redistribute the other 72.
+Before any operator runs, the long side is limited to 640 pixels with area interpolation.
+The code is Python 3 with NumPy and OpenCV.
+No GPU is used.
+The row update of the dynamic program is vectorized across the width.
+
+Five operators are compared.
+\textbf{Scale} is \texttt{cv2.resize} to the exact target, with area interpolation when both sides shrink.
+\textbf{Crop} cuts the centered window of the target aspect ratio and then resizes it to the exact target.
+\textbf{Classic} is backward-energy seam carving.
+\textbf{Ours} is Equation~\eqref{eq:dp} with $w_s = 0.5$ and $w_l = 0.8$.
+\textbf{Hybrid} is that same cost, with seams stopped at 75\% of the original side and a uniform scale after that.
+At a 75\% target the two are the same operator.
+Hybrid is reported on the 50\% width cut.
+The ablation uses the same recurrence with $(w_s, w_l)$ set to $(0,0)$ (forward energy alone), $(0.5, 0)$ (saliency only), and $(0, 0.8)$ (lines only).
+
+The width is reduced to 75\% and to 50\% of the working width, with the height held fixed.
+The 75\% setting is a 25\% reduction and is the one used for the ablation and the runtime.
+\texttt{waterfall} is also reduced to 75\% height, and \texttt{butterfly} is enlarged to 150\% width.
+Every reported output was checked to have the requested height and width.
+
+Two seam scores are reported, and both are computed from the maps that the full model puts in its cost.
+The saliency fraction is the sum of the spectral-residual map on pixels that are actually deleted, divided by the sum of that map.
+Insertion does not delete pixels, so the fraction is not used for the enlargement.
+The line score is the number of seam pixels that land on a positive value of that same line map, per 100 seam pixels.
+Classic seams are scored with the map even though their recurrence does not use it.
+A lower number therefore shows that the weight changed which pixels were deleted.
+It does not, by itself, show that a viewer would prefer the result, and it does not measure tears in regions the maps do not mark.
+Scale and crop do not choose seams, so they have no entry on these two scores.
+Runtime is one wall-clock measurement of the whole call.
+
+\subsection{Results}
+Table~\ref{tab:width75} gives the mean and sample standard deviation at 75\% width.
+Table~\ref{tab:width50} is the 50\% width cut.
+Table~\ref{tab:perimage} is the per-image breakdown at 75\% width.
+Figure~\ref{fig:compare75} shows four of the eight images at 75\% width: the church (lines), the portrait (saliency), the street sculpture (a busy scene), and the waterfall.
+Figure~\ref{fig:compare50} repeats that set at 50\% width.
+Figure~\ref{fig:ablation} isolates the terms on the church.
+Figure~\ref{fig:failure} is the 50\% cut of \texttt{Sanfrancisco}.
+Figure~\ref{fig:height} and Figure~\ref{fig:enlarge} are the height reduction and the enlargement.
+
+\begin{table}[t]
+\centering
+\caption{Eight images at 75\% width. Entries are mean (sample standard deviation). Saliency is the fraction of spectral-residual mass deleted. Lines are pixels of the same line map per 100 seam pixels. Seconds are one run per image.}
+\label{tab:width75}
+\scriptsize
+\begin{tabular}{lccc}
+\toprule
+Method & Saliency & Lines & Seconds \\
+\midrule
+Scale & -- & -- & 0.00 \\
+Crop & -- & -- & 0.00 \\
+Classic & 0.089 (0.045) & 1.30 (1.25) & 11.0 (1.5) \\
+Forward only & 0.089 (0.039) & 1.14 (1.18) & 13.7 (1.4) \\
+Forward + saliency & 0.068 (0.035) & 0.99 (1.09) & 12.9 (3.0) \\
+Forward + lines & 0.089 (0.040) & 0.31 (0.22) & 13.4 (3.3) \\
+Full model & 0.068 (0.036) & 0.37 (0.31) & 14.4 (1.7) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{The same eight images at 50\% width, mean (sample standard deviation).}
+\label{tab:width50}
+\scriptsize
+\begin{tabular}{lccc}
+\toprule
+Method & Saliency & Lines & Seconds \\
+\midrule
+Scale & -- & -- & 0.00 \\
+Crop & -- & -- & 0.00 \\
+Classic & 0.222 (0.097) & 1.61 (1.34) & 21.5 (3.9) \\
+Full model & 0.186 (0.090) & 0.69 (0.56) & 26.0 (3.3) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table*}[t]
+\centering
+\caption{Per-image scores at 75\% width, written as saliency fraction / line crossings per 100 seam pixels. Means that agree to three decimals in Table~\ref{tab:width75} are not the same seams. Images marked $\dagger$ are the two used to choose $w_s$ and $w_l$.}
+\label{tab:perimage}
+\scriptsize
+\begin{tabular}{lccccc}
+\toprule
+Image & Classic & Forward & +Saliency & +Lines & Full \\
+\midrule
+brick\_house & 0.153/3.23 & 0.142/1.82 & 0.120/1.62 & 0.142/0.33 & 0.124/0.46 \\
+butterfly & 0.043/0.16 & 0.055/0.36 & 0.037/0.22 & 0.052/0.04 & 0.036/0.07 \\
+child & 0.023/0.00 & 0.033/0.13 & 0.020/0.03 & 0.032/0.07 & 0.020/0.01 \\
+eagle & 0.108/1.62 & 0.094/0.47 & 0.075/0.28 & 0.090/0.13 & 0.074/0.13 \\
+Johanneskirche$^\dagger$ & 0.070/0.94 & 0.071/0.97 & 0.055/0.90 & 0.071/0.35 & 0.055/0.38 \\
+obama$^\dagger$ & 0.069/0.74 & 0.066/1.02 & 0.042/0.97 & 0.067/0.47 & 0.042/0.57 \\
+Sanfrancisco & 0.137/3.09 & 0.134/3.76 & 0.108/3.37 & 0.139/0.71 & 0.109/0.95 \\
+waterfall & 0.110/0.60 & 0.114/0.59 & 0.086/0.52 & 0.114/0.38 & 0.087/0.37 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+At a 25\% width reduction the two extra terms move different columns of Table~\ref{tab:width75}, and the standard deviations are large.
+Forward energy alone and classic backward energy both have mean saliency fraction 0.089.
+Adding saliency lowers that mean to 0.068.
+Adding the line map without saliency leaves the saliency mean at 0.089 and lowers the line score from 1.14 to 0.31.
+The full model matches the saliency-only mean, 0.068, so on this score the line weight does not undo the saliency weight.
+On the line score the full model is 0.37, which is still far below forward energy and a little worse than lines alone.
+That is most of the line-term reduction, not all of it.
+Table~\ref{tab:perimage} shows why several means print as the same three-decimal number.
+The per-image fractions differ.
+The agreement is rounding of the average.
+The full model is below classic on saliency fraction for every image.
+On line crossings it is lower on seven images.
+On \texttt{child} both scores are at most 0.01, because that photograph barely fires the line detector.
+The absolute line counts are small because the map is sparse: 1.14 versus 0.31 crossings per 100 pixels is a few marked pixels on a seam of a few hundred rows, and the classic standard deviation, 1.25, is as large as the classic mean.
+At 50\% width the means move the same way, 0.186 against 0.222 for saliency and 0.69 against 1.61 for lines, and the full model is lower on both scores for every image.
+The spread remains large.
+
+The weights were chosen on Johanneskirche and \texttt{obama}.
+Dropping those two and averaging the other six, at 75\% width, leaves the same separation: classic 0.096 and 1.45, forward 0.095 and 1.19, saliency only 0.074 and 1.01, lines only 0.095 and 0.28, full model 0.075 and 0.33, again as saliency fraction and line crossings.
+This only checks that the direction is not confined to the two inspected images.
+It is not a retune on held-out data.
+
+Figures~\ref{fig:compare75} and~\ref{fig:compare50} are qualitative.
+At 75\% width, classic seams and the full model look close to each other, while scaling compresses the frame and the center crop cuts the heart in \texttt{Sanfrancisco} and clips the child in \texttt{obama}.
+At 50\% width the sheets suggest less bending in the church window and in the child's outline under the full model.
+Those sheets are small, and this paper does not treat that impression as a measurement.
+\texttt{Sanfrancisco} is a failure under both seam methods: the heart is curved, the Hough map does not guard it, and both pinch it.
+The crop cuts it off, and scaling keeps it by squeezing the frame.
+Figure~\ref{fig:hybrid} is the same 50\% width with the hybrid schedule added.
+The hybrid column is the 75\% seam result scaled down to half width.
+It does not receive the extra seams that, under the full model, continue from 75\% to 50\% and cut the heart further.
+It is also not the scaled original: the first 25\% of seams have already narrowed the sculpture relative to uniform scaling.
+The saliency and line scores are not quoted for hybrid.
+Those scores count only the seams, and hybrid deletes half as many seams before the scale, so a lower fraction would not mean a better picture.
+The waterfall height cut and the butterfly enlargement are single images.
+On the height cut the horizontal line score is 0 for both seam methods, so that map did nothing there; the saliency fractions are 0.009 and 0.016, which is one pair of numbers, not a mean.
+The enlargement reaches 150\% width.
+Scaling stretches the butterfly.
+Seam insertion spends the extra width on the background by writing averaged copies of the recorded seams.
+
+A 25\% width cut takes about 11\,s for classic seams and about 14\,s for the forward variants.
+Scaling and cropping finish in well under 0.01\,s.
+The maps are computed once per call, so they do not explain the differences among the forward rows in Table~\ref{tab:width75}.
+Those differences sit inside the run-to-run spread of a single timing per image.
+The steadier gap is between classic seams and any forward recurrence, which is recomputed on every seam.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_compare_75_paper.png}
+\caption{Width reduced to 75\%. Columns are the original, uniform scale, center crop, classic seams, and the full model.}
+\label{fig:compare75}
+\end{figure*}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_compare_50_paper.png}
+\caption{Width reduced to 50\% on the same four images. Any impression that one seam method bends a window or an outline less than the other is qualitative. The measured claims are the scores in Tables~\ref{tab:width75}--\ref{tab:perimage}.}
+\label{fig:compare50}
+\end{figure*}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{fig_ablation.png}
+\caption{Ablation on Johanneskirche at 75\% width. Forward energy alone, forward energy plus saliency, forward energy plus lines, the full model, and classic backward energy.}
+\label{fig:ablation}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{fig_failure.png}
+\caption{Failure case. \texttt{Sanfrancisco} at 50\% width. The crop cuts the heart, scaling squeezes it, and both seam methods pinch the curved outline. The Hough map does not protect that curve.}
+\label{fig:failure}
+\end{figure}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_hybrid_50.png}
+\caption{Width reduced to 50\%. Columns are the original, uniform scale, the full model carved all the way, and hybrid (seams until 75\% of the original width, then scale). Hybrid avoids only the damage that the extra seams would add past 75\%.}
+\label{fig:hybrid}
+\end{figure*}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{fig_height.png}
+\caption{Height reduced to 75\% on \texttt{waterfall}. Horizontal seams use the line map weighted by $|\cos\theta|$.}
+\label{fig:height}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{fig_enlarge.png}
+\caption{Width enlarged to 150\% on \texttt{butterfly}. Seams are recorded by removal and inserted as averaged duplicates.}
+\label{fig:enlarge}
+\end{figure}
+
+The full eight-image contact sheets are Figures~\ref{fig:all75} and~\ref{fig:all50} in the appendix.
+Across the 75\% and 50\% trials, every output size matched the requested size.
+
+\subsection{What the demo shows}
+The Gradio application loads an image, caps the long side at 640 pixels, and takes the target size as a percentage of that working image.
+The user picks scale, crop, classic, the full model, or the hybrid schedule, and moves $w_s$ and $w_l$.
+Optional panels show the saliency map, the vertical-seam line map, and the next vertical seam.
+Three examples are wired to the roles above: Johanneskirche for lines, obama for a person, and Sanfrancisco for the busy failure.
+A useful order in a presentation is to raise $w_l$ on the church, compare classic and the full model on the portrait, and then set the street scene to 50\% width and say plainly what every method loses.
+
+\subsection{Limitations}
+The saliency and line scores reuse the maps inside the cost.
+A lower score shows that the corresponding weight changed the seam.
+It does not show that the deleted pixels were less important to a viewer, and pushing seams off those maps can tear texture that neither map marks.
+No second saliency model, no independent line detector, and no summed forward-energy of the chosen seams is reported, so that tradeoff is not measured.
+Spectral residual saliency responds strongly to edges.
+It is not a subject detector.
+The line map only contains segments the Hough transform returns, so short and curved structures, including the heart sculpture, are unprotected except where the residual happens to be high.
+A strong-edge penalty does not fix that curve: the seam pays it at the crossing and then follows the cheap interior.
+The hybrid schedule stops further seam cuts after 75\%, which is not the same as protecting the object during the first 25\%.
+The weights were chosen on two of the eight test images, and they were not swept.
+The line-score standard deviation is about as large as the classic mean, and $n=8$ is a small slice of RetargetMe.
+The comparison does not include the published RetargetMe operators, such as multi-operator search, shift-map, or warping.
+Hybrid is a fixed seam-then-scale schedule, not that search.
+The height cut and the enlargement are single images.
+Runtimes are one measurement each.
+There is no user study.
+
+\section{Conclusion}
+The operator is forward-energy seam carving plus a spectral-residual term and an orientation-weighted line term.
+On eight RetargetMe images, turning the terms off one at a time moves two different scores, and both scores are built from the maps in the cost.
+The saliency weight lowers deleted residual mass from 0.089 to 0.068.
+The line weight lowers line-map crossings from 1.14 to 0.31 per 100 seam pixels.
+The full model keeps the saliency-score reduction and most, not all, of the line-score reduction: its line score is 0.37 rather than 0.31.
+The same direction remains if the two images used to pick the weights are left out of the average.
+That is evidence that the weights do what they were built to do.
+It is not evidence that the results look better, that subjects are preserved, or that the method beats other published retargeting operators.
+Scaling and cropping are the simple baselines.
+A large reduction of a busy curved scene still damages the content.
+Stopping the seams at 75\% and scaling the rest removes only the extra damage that comes from carving on to half width.
+It does not put the curved sculpture back to the shape that uniform scaling keeps.
+
+{
+\small
+\bibliographystyle{ieeenat_fullname}
+\bibliography{main}
+}
+
+\appendix
+\onecolumn
+
+\section{Individual contributions}
+\subsection{Shreyas Gupta (230991)}
+I implemented the luminance, spectral-residual saliency, and orientation-aware line maps; the forward-energy and classic backward-energy dynamic programs, including seam removal and insertion; the scaling and center-crop baselines; the hybrid schedule that stops seams at 75\% of a side; the RetargetMe experiments and figures; the Gradio demo; and this write-up.
+
+\section{Links}
+The source images are the RetargetMe archive of Rubinstein et al.:
+\url{http://people.csail.mit.edu/mrub/retargetme/}
+and the file linked as ``source images only'' from
+\url{http://people.csail.mit.edu/mrub/retargetme/download.html}.
+The libraries are OpenCV (\url{https://github.com/opencv/opencv}),
+NumPy (\url{https://github.com/numpy/numpy}),
+and Gradio (\url{https://github.com/gradio-app/gradio}).
+The complete source is printed in the next section and included with this submission.
+No public repository link is attached.
+
+\section{All eight images}
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth,height=0.78\textheight,keepaspectratio]{fig_compare_75.png}
+\caption{All eight images at 75\% width. Columns are the original, scale, crop, classic seams, and the full model.}
+\label{fig:all75}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth,height=0.78\textheight,keepaspectratio]{fig_compare_50.png}
+\caption{All eight images at 50\% width.}
+\label{fig:all50}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth,height=0.78\textheight,keepaspectratio]{fig_hybrid_50_all.png}
+\caption{All eight images at 50\% width. Columns are the original, uniform scale, the full model, and hybrid.}
+\label{fig:hybridall}
+\end{figure}
+
+\section{Source code}
+The listings below are the program submitted with this report.
+They match the source included with this submission.
+
+\begingroup
+\catcode`\_=12
+\lstinputlisting[caption={src/__init__.py}]{../src/__init__.py}
+\endgroup
+\lstinputlisting[caption={src/energy.py}]{../src/energy.py}
+\lstinputlisting[caption={src/seam.py}]{../src/seam.py}
+\lstinputlisting[caption={src/baselines.py}]{../src/baselines.py}
+\lstinputlisting[caption={src/retarget.py}]{../src/retarget.py}
+\lstinputlisting[caption={src/metrics.py}]{../src/metrics.py}
+\lstinputlisting[caption={src/display.py}]{../src/display.py}
+\lstinputlisting[caption={app.py}]{../app.py}
+\begingroup
+\catcode`\_=12
+\lstinputlisting[caption={experiments/download_retargetme.py}]{../experiments/download_retargetme.py}
+\lstinputlisting[caption={experiments/run_experiments.py}]{../experiments/run_experiments.py}
+\lstinputlisting[caption={experiments/run_hybrid.py}]{../experiments/run_hybrid.py}
+\endgroup
+
+\end{document}
