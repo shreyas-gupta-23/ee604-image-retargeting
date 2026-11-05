@@ -21,7 +21,12 @@ sys.path.insert(0, str(ROOT))
 from src.baselines import limit_long_side  # noqa: E402
 from src.display import colorize, draw_vertical_seam  # noqa: E402
 from src.energy import line_protection, luminance  # noqa: E402
-from src.metrics import line_crossings_per_100, saliency_removed_fraction, size_matches  # noqa: E402
+from src.metrics import (  # noqa: E402
+    line_crossings_per_100,
+    lsd_crossings_per_100,
+    saliency_removed_fraction,
+    size_matches,
+)
 from src.retarget import next_vertical_seam, protection_maps, retarget  # noqa: E402
 
 IMAGE_DIR = ROOT / "experiments" / "retargetme"
@@ -38,6 +43,17 @@ WEIGHTS = {
     "crop": (0.0, 0.0),
 }
 SEAM_METHODS = {"classic", "ours", "forward", "forward_saliency", "forward_lines"}
+# Contact sheets stay on this set. A larger CSV run must not draw every image.
+PAPER_FIGURES = (
+    "brick_house",
+    "butterfly",
+    "child",
+    "eagle",
+    "Johanneskirche",
+    "obama",
+    "Sanfrancisco",
+    "waterfall",
+)
 
 
 def load_rgb(path: Path) -> np.ndarray:
@@ -73,12 +89,15 @@ def row_for(name, setting, method, image, output, info, elapsed, target_hw) -> d
     seam = method in SEAM_METHODS or method in ("forward", "forward_saliency", "forward_lines")
     sal = ""
     lines = ""
+    lsd = ""
     if seam and info.get("seam_pixels", 0) > 0:
         sal = f"{saliency_removed_fraction(info):.6f}"
         lines = f"{line_crossings_per_100(info):.4f}"
+        lsd = f"{lsd_crossings_per_100(info):.4f}"
     elif seam:
         sal = "0"
         lines = "0"
+        lsd = "0"
     return {
         "image": name,
         "setting": setting,
@@ -93,6 +112,7 @@ def row_for(name, setting, method, image, output, info, elapsed, target_hw) -> d
         "saliency_removed_fraction": sal,
         "line_crossings_per_100": lines,
         "runtime_s": f"{elapsed:.4f}",
+        "lsd_crossings_per_100": lsd,
     }
 
 
@@ -239,7 +259,10 @@ def main() -> None:
 
     compare_75 = []
     compare_50 = []
-    for name, image in images.items():
+    for name in PAPER_FIGURES:
+        if name not in images:
+            continue
+        image = images[name]
         compare_75.append((name, [
             ("Original", image),
             ("Scale", outputs[(name, "width_75", "scale")]),

@@ -1,0 +1,16 @@
+seed 604
+sample 30: Brasserie_L_Aficion, Canalhouse, JapenessHouse, Marblehead_Mass, Sanfrancisco, Unazukin, bicycle1, bicycle2, buddha, child, colosseum, family, fish, foliage, getty, girls, glasses, house, housefence, jon, money, orchid, osaka, pencils, penguins, pigeons, surfers, tower, twobirds, waterfall
+headline drops Johanneskirche, obama; n=30
+setting width_75, sample standard deviation (n - 1)
+LSD is not inside the cost
+
+method                   n         saliency            hough              lsd
+classic                 30   0.118 (0.037)    1.70 ( 1.45)    1.08 ( 0.93)
+forward                 30   0.121 (0.035)    2.07 ( 1.75)    1.35 ( 1.37)
+forward_saliency        30   0.091 (0.032)    1.87 ( 1.75)    1.42 ( 1.51)
+forward_lines           30   0.122 (0.036)    0.94 ( 0.75)    1.16 ( 0.94)
+ours                    30   0.093 (0.031)    1.03 ( 0.86)    1.26 ( 1.10)
+
+LSD sign test, full versus classic, lower/higher/tied 12/17/1, two-sided binomial p=0.4583 on 29 non-ties
+LSD sign test, +lines versus forward-only, lower/higher/tied 16/13/1, two-sided binomial p=0.7111 on 29 non-ties
+saliency sign test, full versus classic, lower/higher/tied 30/0/0, two-sided binomial p=1.8626e-09 on 30 non-ties

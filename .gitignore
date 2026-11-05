@@ -7,5 +7,17 @@ paper/_kit_preamble.tex
 paper/*.aux
 paper/*.bbl
 paper/*.blg
+paper/*.brf
 paper/*.log
 paper/*.out
+paper/main_learned.*
+paper_local/
+experiments/backup_*/
+experiments/results_*.zip
+experiments/results/outputs/
+experiments/results/sheets_n30/
+experiments/results/maps/
+experiments/results/overnight_log.txt
+experiments/results/overnight_status.txt
+experiments/results/fig_n30_overview.png
+experiments/retargetme_n30/

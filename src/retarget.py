@@ -22,17 +22,32 @@ from __future__ import annotations
 import numpy as np
 
 from .baselines import center_crop_resize, scale_to
-from .energy import curve_protection, line_protection, luminance, spectral_residual_saliency
+from .energy import (
+    curve_protection,
+    learned_saliency,
+    line_protection,
+    luminance,
+    spectral_residual_saliency,
+)
 from .metrics import accumulate_seam, empty_counts
 from .seam import insert_vertical_seams, remove_vertical_seam, vertical_seam
 
 DEFAULT_WEIGHTS = (0.5, 0.8)
+# Learned-source saliency weight. Frozen before any other image is carved.
+# Rule: smallest w_s in {0.25, 0.5, 1, 2, 4} with learned-mass fraction below
+# half the forward-only value on both Johanneskirche and obama, unless that
+# carve is visibly torn, in which case the next lower value. w_l stays 0.8.
+# 0.25 meets the mass rule on both and is not torn. Spectral runs keep
+# DEFAULT_WEIGHTS. Obama's learned map marks the car door, not the people.
+LEARNED_W_S = 0.25
+LEARNED_W_L = 0.8
 # Seams are allowed to remove at most this fraction of a side.
 HYBRID_KEEP = 0.75
 
 
 def retarget(image: np.ndarray, target_hw: tuple[int, int], method: str = "ours",
-             weights: tuple[float, float] = DEFAULT_WEIGHTS, return_info: bool = False):
+             weights: tuple[float, float] = DEFAULT_WEIGHTS, return_info: bool = False,
+             saliency_source: str = "spectral", score_both: bool = False):
     """Return the retargeted RGB uint8 image.
 
     When ``return_info`` is true, also return a dict of seam statistics.
@@ -67,7 +82,9 @@ def retarget(image: np.ndarray, target_hw: tuple[int, int], method: str = "ours"
     else:
         shrink_h, shrink_w = min(target_h, height), min(target_w, width)
         detector, w_c = "hough", 0.0
-    carved, counts = _shrink(rgb, shrink_h, shrink_w, mode, w_s, w_l, w_c, detector)
+    carved, counts = _shrink(
+        rgb, shrink_h, shrink_w, mode, w_s, w_l, w_c, detector, saliency_source, score_both,
+    )
     counts["scaled_after_seams"] = 0
     scale_h = target_h if target_h < carved.shape[0] else carved.shape[0]
     scale_w = target_w if target_w < carved.shape[1] else carved.shape[1]
@@ -76,10 +93,14 @@ def retarget(image: np.ndarray, target_hw: tuple[int, int], method: str = "ours"
         counts["scaled_after_seams"] = 1
 
     if target_w > carved.shape[1]:
-        carved, insert_counts = _enlarge_width(carved, target_w, mode, w_s, w_l, w_c, detector)
+        carved, insert_counts = _enlarge_width(
+            carved, target_w, mode, w_s, w_l, w_c, detector, saliency_source,
+        )
         _merge_path_counts(counts, insert_counts)
     if target_h > carved.shape[0]:
-        carved, insert_counts = _enlarge_height(carved, target_h, mode, w_s, w_l, w_c, detector)
+        carved, insert_counts = _enlarge_height(
+            carved, target_h, mode, w_s, w_l, w_c, detector, saliency_source,
+        )
         _merge_path_counts(counts, insert_counts)
 
     info = dict(counts)
@@ -127,14 +148,55 @@ def _drop_curve(curves, seam, transpose: bool):
     return remove_vertical_seam(curves, seam)
 
 
-def _shrink(image, target_h, target_w, mode, w_s, w_l, w_c=0.0, detector="hough"):
+def _saliency_for_cost(image, lum, source: str):
+    if source == "spectral":
+        return spectral_residual_saliency(lum)
+    if source == "learned":
+        return learned_saliency(image)
+    raise ValueError("saliency_source must be 'spectral' or 'learned'")
+
+
+def _count_mass(counts: dict, key: str, saliency: np.ndarray, seam: np.ndarray) -> None:
+    rows = np.arange(seam.shape[0])
+    counts[key] += float(saliency[rows, seam].sum())
+
+
+def _count_blob(counts: dict, saliency: np.ndarray, seam: np.ndarray) -> None:
+    """Seam pixels on learned-map values above 0.5. No-op unless that count was armed."""
+    if "learned_blob_hits" not in counts:
+        return
+    rows = np.arange(seam.shape[0])
+    counts["learned_blob_hits"] += int(np.count_nonzero(saliency[rows, seam] > 0.5))
+
+
+def _shrink(image, target_h, target_w, mode, w_s, w_l, w_c=0.0, detector="hough",
+            saliency_source="spectral", score_both=False):
     lum = luminance(image)
-    saliency = spectral_residual_saliency(lum)
+    saliency = _saliency_for_cost(image, lum, saliency_source)
     line_v = line_protection(lum, "vertical", detector)
     line_h = line_protection(lum, "horizontal", detector)
+    # LSD is a score only. It is not passed into the dynamic program.
+    lsd_v = line_protection(lum, "vertical", "lsd")
+    lsd_h = line_protection(lum, "horizontal", "lsd")
     curves = curve_protection(lum) if w_c else None
     counts = empty_counts()
     counts["saliency_total"] = float(saliency.sum())
+    if saliency_source == "learned" or (score_both and saliency_source == "spectral"):
+        counts["learned_blob_hits"] = 0
+    # The other map is a score only. It is not passed into the dynamic program.
+    other = None
+    other_key = None
+    if score_both:
+        if saliency_source == "spectral":
+            other = learned_saliency(image)
+            other_key = "learned_removed"
+            counts["learned_total"] = float(other.sum())
+            counts["learned_removed"] = 0.0
+        else:
+            other = spectral_residual_saliency(lum)
+            other_key = "spectral_removed"
+            counts["spectral_total"] = float(other.sum())
+            counts["spectral_removed"] = 0.0
 
     current = image
     while current.shape[0] > target_h or current.shape[1] > target_w:
@@ -154,10 +216,20 @@ def _shrink(image, target_h, target_w, mode, w_s, w_l, w_c=0.0, detector="hough"
             if seam_v is None:
                 seam_v, _ = vertical_seam(current, saliency, line_v, mode, w_s, w_l, curves, w_c)
             accumulate_seam(counts, saliency, line_v, seam_v, vertical=True)
+            _count_lsd(counts, lsd_v, seam_v)
+            if saliency_source == "learned":
+                _count_blob(counts, saliency, seam_v)
+            elif other is not None:
+                _count_blob(counts, other, seam_v)
+            if other is not None:
+                _count_mass(counts, other_key, other, seam_v)
+                other = remove_vertical_seam(other, seam_v)
             current = remove_vertical_seam(current, seam_v)
             saliency = remove_vertical_seam(saliency, seam_v)
             line_v = remove_vertical_seam(line_v, seam_v)
             line_h = remove_vertical_seam(line_h, seam_v)
+            lsd_v = remove_vertical_seam(lsd_v, seam_v)
+            lsd_h = remove_vertical_seam(lsd_h, seam_v)
             curves = _drop_curve(curves, seam_v, transpose=False)
         else:
             if seam_h is None:
@@ -165,15 +237,32 @@ def _shrink(image, target_h, target_w, mode, w_s, w_l, w_c=0.0, detector="hough"
             transposed_sal = saliency.T
             transposed_line = line_h.T
             accumulate_seam(counts, transposed_sal, transposed_line, seam_h, vertical=False)
+            _count_lsd(counts, lsd_h.T, seam_h)
+            if saliency_source == "learned":
+                _count_blob(counts, transposed_sal, seam_h)
+            elif other is not None:
+                _count_blob(counts, other.T, seam_h)
+            if other is not None:
+                _count_mass(counts, other_key, other.T, seam_h)
+                other = remove_vertical_seam(other.T, seam_h).T
             current = _transpose_image(remove_vertical_seam(_transpose_image(current), seam_h))
             saliency = remove_vertical_seam(transposed_sal, seam_h).T
             line_h = remove_vertical_seam(transposed_line, seam_h).T
             line_v = remove_vertical_seam(line_v.T, seam_h).T
+            lsd_h = remove_vertical_seam(lsd_h.T, seam_h).T
+            lsd_v = remove_vertical_seam(lsd_v.T, seam_h).T
             curves = _drop_curve(curves, seam_h, transpose=True)
+    if score_both and saliency_source == "spectral":
+        counts["spectral_total"] = counts["saliency_total"]
+        counts["spectral_removed"] = counts["saliency_removed"]
+    elif score_both:
+        counts["learned_total"] = counts["saliency_total"]
+        counts["learned_removed"] = counts["saliency_removed"]
     return current, counts
 
 
-def _enlarge_width(image, target_w, mode, w_s, w_l, w_c=0.0, detector="hough"):
+def _enlarge_width(image, target_w, mode, w_s, w_l, w_c=0.0, detector="hough",
+                   saliency_source="spectral"):
     """Record seams by removal, then insert averaged duplicates into ``image``."""
     current = image
     total = empty_counts()
@@ -183,24 +272,30 @@ def _enlarge_width(image, target_w, mode, w_s, w_l, w_c=0.0, detector="hough"):
         step = min(need, room)
         if step <= 0:
             break
-        seams, counts = _record_vertical_seams(current, step, mode, w_s, w_l, w_c, detector)
+        seams, counts = _record_vertical_seams(
+            current, step, mode, w_s, w_l, w_c, detector, saliency_source,
+        )
         _merge_path_counts(total, counts)
         current = insert_vertical_seams(current, seams)
     return current, total
 
 
-def _enlarge_height(image, target_h, mode, w_s, w_l, w_c=0.0, detector="hough"):
+def _enlarge_height(image, target_h, mode, w_s, w_l, w_c=0.0, detector="hough",
+                    saliency_source="spectral"):
     transposed = _transpose_image(image)
-    enlarged, counts = _enlarge_width(transposed, target_h, mode, w_s, w_l, w_c, detector)
+    enlarged, counts = _enlarge_width(
+        transposed, target_h, mode, w_s, w_l, w_c, detector, saliency_source,
+    )
     counts["horizontal_seams"] = counts["vertical_seams"]
     counts["vertical_seams"] = 0
     return _transpose_image(enlarged), counts
 
 
-def _record_vertical_seams(image, count, mode, w_s, w_l, w_c=0.0, detector="hough"):
+def _record_vertical_seams(image, count, mode, w_s, w_l, w_c=0.0, detector="hough",
+                           saliency_source="spectral"):
     height, width = image.shape[:2]
     lum = luminance(image)
-    saliency = spectral_residual_saliency(lum)
+    saliency = _saliency_for_cost(image, lum, saliency_source)
     lines = line_protection(lum, "vertical", detector)
     curves = curve_protection(lum) if w_c else None
     columns = np.tile(np.arange(width, dtype=np.int32), (height, 1))
@@ -238,8 +333,13 @@ def _transpose_image(image: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(np.transpose(image, (1, 0, 2)))
 
 
+def _count_lsd(counts: dict, lsd: np.ndarray, seam: np.ndarray) -> None:
+    rows = np.arange(seam.shape[0])
+    counts["lsd_hits"] += int(np.count_nonzero(lsd[rows, seam] > 0))
+
+
 def _merge_path_counts(total: dict, extra: dict) -> None:
-    for key in ("line_hits", "seam_pixels", "vertical_seams", "horizontal_seams"):
+    for key in ("line_hits", "lsd_hits", "seam_pixels", "vertical_seams", "horizontal_seams"):
         total[key] += extra[key]
 
 

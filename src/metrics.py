@@ -16,6 +16,7 @@ def empty_counts() -> dict:
         "saliency_total": 0.0,
         "saliency_removed": 0.0,
         "line_hits": 0,
+        "lsd_hits": 0,
         "seam_pixels": 0,
         "vertical_seams": 0,
         "horizontal_seams": 0,
@@ -34,6 +35,14 @@ def line_crossings_per_100(counts: dict) -> float:
     if pixels <= 0:
         return 0.0
     return 100.0 * float(counts["line_hits"]) / pixels
+
+
+def lsd_crossings_per_100(counts: dict) -> float:
+    """Seam pixels on the LSD map, per 100 seam pixels. Not used to choose seams."""
+    pixels = int(counts["seam_pixels"])
+    if pixels <= 0:
+        return 0.0
+    return 100.0 * float(counts.get("lsd_hits", 0)) / pixels
 
 
 def size_matches(image: np.ndarray, target_hw: tuple[int, int]) -> bool:

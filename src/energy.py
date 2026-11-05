@@ -50,6 +50,33 @@ def spectral_residual_saliency(lum: np.ndarray) -> np.ndarray:
     return _normalize(saliency)
 
 
+_LEARNED_SESSION = None
+
+
+def learned_saliency(rgb_uint8: np.ndarray) -> np.ndarray:
+    """U$^2$-Net-small map in ``[0, 1]``, the same height and width as ``rgb_uint8``.
+
+    The session is created on the first call and kept. Call this once per
+    image, not once per seam. The default cost still uses
+    :func:`spectral_residual_saliency`.
+    """
+    global _LEARNED_SESSION
+    rgb = np.ascontiguousarray(rgb_uint8)
+    if rgb.ndim != 3 or rgb.shape[2] != 3 or rgb.dtype != np.uint8:
+        raise ValueError("learned_saliency expects uint8 RGB of shape (H, W, 3)")
+    if _LEARNED_SESSION is None:
+        from rembg import new_session
+        _LEARNED_SESSION = new_session("u2netp")
+    from rembg import remove
+    mask = np.asarray(remove(rgb, session=_LEARNED_SESSION, only_mask=True))
+    if mask.ndim == 3:
+        mask = mask[:, :, 0]
+    height, width = rgb.shape[:2]
+    if mask.shape[:2] != (height, width):
+        mask = cv2.resize(mask.astype(np.float32), (width, height), interpolation=cv2.INTER_LINEAR)
+    return _normalize(np.asarray(mask, dtype=np.float32))
+
+
 def gradient_magnitude(lum: np.ndarray) -> np.ndarray:
     """Backward-energy map: sum of absolute Sobel responses."""
     gx = cv2.Sobel(lum.astype(np.float32), cv2.CV_32F, 1, 0, ksize=3)

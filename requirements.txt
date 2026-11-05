@@ -1,4 +1,6 @@
 numpy
 opencv-python
 gradio
-pillow
+pillow>=12.1,<13
+rembg
+onnxruntime

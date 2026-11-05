@@ -26,13 +26,19 @@ Indian Institute of Technology Kanpur
 Image retargeting changes the height and width of a photograph so that it fits a new layout while the objects a viewer would notice, and the long straight structures in the scene, stay intact.
 Uniform scaling compresses the whole frame, and a center crop throws away everything outside a window.
 This project instead deletes or duplicates low-cost seams.
-The seam cost is the forward energy of Rubinstein, Shamir, and Avidan, which charges the new edges a deletion would create, plus two maps that use no learned weights: spectral-residual saliency, and a line map whose weight depends on the direction of the seam.
+The seam cost is the forward energy of Rubinstein, Shamir, and Avidan, which charges the new edges a deletion would create, plus two maps: spectral-residual saliency, and a line map whose weight depends on the direction of the seam. A pretrained salient-object model is an optional comparison and is not the default cost.
 Vertical seams are discouraged from cutting vertical structures, and horizontal seams from cutting horizontal ones.
 On eight images from the RetargetMe benchmark, the combined cost is compared with scaling, center-cropping, classic backward-energy seams, and ablations that turn saliency or lines off.
 Against forward energy alone, on eight images at a 25\% width reduction, the saliency weight lowers the mean deleted spectral-residual fraction from 0.089 to 0.068, and the line weight lowers crossings of the same line map from 1.14 to 0.31 per 100 seam pixels.
+On the seeded 30 images that saliency reduction holds: the full model is 0.093 (0.031) against 0.118 (0.037) for classic seams, lower on all 30 (two-sided sign test $p = 1.86 \times 10^{-9}$).
 The full model matches the saliency-only score and sits a little above the lines-only score, at 0.37 rather than 0.31.
-Both scores reuse the maps inside the cost, so they show that the weights move the seams.
-They are not an independent measure of whether the picture looks better.
+The saliency and Hough line scores reuse the maps inside the cost, so they show that the weights move the seams.
+On those eight, an LSD map that is not in the cost shrinks the line-score gap from about 72\% to about 13\%, and the full model is lower on only four images.
+That drop does not hold on a seeded sample of 30 RetargetMe images.
+The draw, seed 604, did not include Johanneskirche or \texttt{obama}.
+At 75\% width the full model's LSD score is 1.26 (1.10) against 1.08 (0.93) for classic seams, lower on 12 images, higher on 17, and tied on one (two-sided sign test $p = 0.46$).
+Forward energy alone is 1.35 (1.37), and adding the line weight leaves 1.16 (0.94), lower on 16, higher on 13, and tied on one ($p = 0.71$).
+These scores are not a measure of whether the picture looks better.
 At 75\% width the two seam results look similar.
 A center crop already removes off-center content, and a 50\% cut of a curved sculpture pinches it under both seam methods.
 A hybrid schedule uses the same cost but stops the seams at 75\% of the original side and scales the rest.
@@ -46,8 +52,8 @@ The operation that produces the new size is image retargeting.
 Its input is one color image, a target height, and a target width.
 Its output is an image of that exact size.
 The constraint in this project is that the computation stays in the spatial domain.
-There is no trained retargeting network and no learned saliency model.
-The implementation uses NumPy and OpenCV, and the dynamic program runs on images whose long side is at most 640 pixels so that a demo can recompute a result on request.
+There is no trained retargeting network. A pretrained salient-object model is an optional comparison and is not the default cost.
+The implementation uses NumPy 2.5.4, OpenCV 5.0.0, and, only for that comparison, rembg 2.0.86 with onnxruntime 1.29.0 and the u2netp checkpoint (4574861 bytes). The dynamic program runs on images whose long side is at most 640 pixels so that a demo can recompute a result on request.
 
 Two standard operators ignore content.
 Scaling moves every pixel by the same factor, so a face becomes thinner when the frame becomes narrower.
@@ -60,7 +66,7 @@ That cost does not look at the tear those pixels leave behind, and a smooth subj
 
 Forward energy~\cite{rubinstein2008improved} fixes the tear by scoring the edges that appear after the deletion.
 It still has no notion of a person or of a window mullion.
-Saliency raises the cost of pixels that the spectral residual marks. Those pixels are often edges, not a detected person.
+The default saliency term raises the cost of pixels that the spectral residual marks. Those pixels are often edges, not a detected person. The optional learned map is a pretrained salient-object model.
 A line map raises the cost of long straight segments.
 Both ideas exist in the literature as separate add-ons.
 The variant defended here puts them in one recurrence, and it does not treat every line the same way.
@@ -193,11 +199,13 @@ If the target is smaller, seams stop at $\mathrm{round}(0.75 \times \text{origin
 A request for 50\% width therefore deletes columns by seams until the width is 75\% of the original, then resizes that image to 50\%.
 Enlargement is unchanged.
 This is a fixed schedule, not a search over operators~\cite{rubinstein2009multi}.
-An edge-density term was tried as a way to protect curves and then left out of the cost.
-A vertical seam crosses a curved outline in a few rows and then travels through the smooth interior, so raising the outline moves the seam into that interior.
-On \texttt{Sanfrancisco} those paths go through the painted sky on the heart.
-The Hough line map is also unchanged.
-OpenCV's line-segment detector is present in this installation and was not substituted, so every line score in Section~\ref{sec:exp} still refers to one detector.
+An edge-density term was tried informally as a way to protect curves and then left out of the cost.
+It was not measured, and there is no figure for it.
+A vertical seam crosses a curved outline in a few rows and then travels through the smooth interior, so raising the outline can move the seam into that interior.
+Figure~\ref{fig:maps} shows the saliency map, the line map, and the next seam on Johanneskirche.
+The Hough line map in the cost is unchanged.
+OpenCV's line-segment detector is not substituted into that cost.
+Section~\ref{sec:exp} still scores the Hough map, and it also counts the same seams on a separate LSD map that does not choose them.
 
 \begin{figure*}[t]
 \centering
@@ -232,18 +240,31 @@ The 75\% setting is a 25\% reduction and is the one used for the ablation and th
 \texttt{waterfall} is also reduced to 75\% height, and \texttt{butterfly} is enlarged to 150\% width.
 Every reported output was checked to have the requested height and width.
 
-Two seam scores are reported, and both are computed from the maps that the full model puts in its cost.
+Three seam scores are reported.
 The saliency fraction is the sum of the spectral-residual map on pixels that are actually deleted, divided by the sum of that map.
 Insertion does not delete pixels, so the fraction is not used for the enlargement.
-The line score is the number of seam pixels that land on a positive value of that same line map, per 100 seam pixels.
-Classic seams are scored with the map even though their recurrence does not use it.
+The Hough line score is the number of seam pixels that land on a positive value of the Hough map, per 100 seam pixels.
+The LSD line score is the same count on an LSD map.
+The saliency fraction and the Hough score use maps that the full model puts in its cost.
+The LSD map does not.
+Classic seams are scored with those maps even though their recurrence does not use them.
 A lower number therefore shows that the weight changed which pixels were deleted.
 It does not, by itself, show that a viewer would prefer the result, and it does not measure tears in regions the maps do not mark.
-Scale and crop do not choose seams, so they have no entry on these two scores.
+Scale and crop do not choose seams, so they have no entry on these three scores.
 Runtime is one wall-clock measurement of the whole call.
+Before the 30-image sample, the original eight were carved again at 75\% width.
+The saliency fraction and the Hough score matched \texttt{metrics.csv} on every seam method, including \texttt{brick\_house} classic at 0.153154 and 3.2319.
+That sample is 30 source images drawn with seed 604.
+Three of those 30 are also in the original eight: \texttt{child}, \texttt{Sanfrancisco}, and \texttt{waterfall}.
+LSD is counted in the same pass that chooses the seams.
+The run writes a CSV only.
+Contact sheets stay the original eight.
 
 \subsection{Results}
 Table~\ref{tab:width75} gives the mean and sample standard deviation at 75\% width.
+Those standard deviations, Table~\ref{tab:perimage}, and the six-image check later in this section are the printout of \texttt{experiments/report\_numbers.py} on the saved \texttt{metrics.csv}.
+They are the worked example.
+Table~\ref{tab:n30} and the sign tests below it are the printout of \texttt{experiments/run\_n30.py}, saved as \texttt{n30\_summary.txt}.
 Table~\ref{tab:width50} is the 50\% width cut.
 Table~\ref{tab:perimage} is the per-image breakdown at 75\% width.
 Figure~\ref{fig:compare75} shows four of the eight images at 75\% width: the church (lines), the portrait (saliency), the street sculpture (a busy scene), and the waterfall.
@@ -254,7 +275,7 @@ Figure~\ref{fig:height} and Figure~\ref{fig:enlarge} are the height reduction an
 
 \begin{table}[t]
 \centering
-\caption{Eight images at 75\% width. Entries are mean (sample standard deviation). Saliency is the fraction of spectral-residual mass deleted. Lines are pixels of the same line map per 100 seam pixels. Seconds are one run per image.}
+\caption{Worked example, the original eight images, at 75\% width. Entries are mean (sample standard deviation). Saliency is the fraction of spectral-residual mass deleted. Lines are pixels of the Hough map per 100 seam pixels. Seconds are one run per image. This is not the 30-image sample.}
 \label{tab:width75}
 \scriptsize
 \begin{tabular}{lccc}
@@ -274,7 +295,7 @@ Full model & 0.068 (0.036) & 0.37 (0.31) & 14.4 (1.7) \\
 
 \begin{table}[t]
 \centering
-\caption{The same eight images at 50\% width, mean (sample standard deviation).}
+\caption{Worked example, the same original eight images, at 50\% width. Mean (sample standard deviation). Not the 30-image sample.}
 \label{tab:width50}
 \scriptsize
 \begin{tabular}{lccc}
@@ -291,7 +312,7 @@ Full model & 0.186 (0.090) & 0.69 (0.56) & 26.0 (3.3) \\
 
 \begin{table*}[t]
 \centering
-\caption{Per-image scores at 75\% width, written as saliency fraction / line crossings per 100 seam pixels. Means that agree to three decimals in Table~\ref{tab:width75} are not the same seams. Images marked $\dagger$ are the two used to choose $w_s$ and $w_l$.}
+\caption{Worked example: per-image Hough scores on the original eight at 75\% width, written as saliency fraction / line crossings per 100 seam pixels. Means that agree to three decimals in Table~\ref{tab:width75} are not the same seams. Images marked $\dagger$ are the two used to choose $w_s$ and $w_l$, and they are left out of the 30-image headline.}
 \label{tab:perimage}
 \scriptsize
 \begin{tabular}{lccccc}
@@ -322,10 +343,70 @@ The per-image fractions differ.
 The agreement is rounding of the average.
 The full model is below classic on saliency fraction for every image.
 On line crossings it is lower on seven images.
-On \texttt{child} both scores are at most 0.01, because that photograph barely fires the line detector.
+On \texttt{child} the saliency fractions run from 0.020 to 0.033. They are not 0.01 or lower. The line scores for classic and the full model are 0.00 and 0.01, because that photograph barely fires the line detector.
 The absolute line counts are small because the map is sparse: 1.14 versus 0.31 crossings per 100 pixels is a few marked pixels on a seam of a few hundred rows, and the classic standard deviation, 1.25, is as large as the classic mean.
-At 50\% width the means move the same way, 0.186 against 0.222 for saliency and 0.69 against 1.61 for lines, and the full model is lower on both scores for every image.
+At 50\% width the means move the same way, 0.186 against 0.222 for saliency and 0.69 against 1.61 for lines.
+Table~\ref{tab:width50img} is that cut image by image.
+On saliency and on the Hough score the full model is lower for every image.
+The LSD entry is lower on six of the eight.
+On \texttt{brick\_house} both cells print as 1.46, and the unrounded full score is still the lower one.
 The spread remains large.
+
+\begin{table*}[t]
+\centering
+\caption{Worked example: the original eight at 50\% width. Each cell is saliency fraction / Hough crossings / LSD crossings per 100 seam pixels, for classic seams and the full model. These cells are the printout of \texttt{experiments/report\_numbers.py}. This is not Table~\ref{tab:n30}. Images marked $\dagger$ were used to choose the weights.}
+\label{tab:width50img}
+\scriptsize
+\begin{tabular}{lcc}
+\toprule
+Image & Classic & Full model \\
+\midrule
+brick\_house & 0.349/3.61/1.46 & 0.307/0.95/1.46 \\
+butterfly & 0.131/0.48/0.66 & 0.105/0.17/0.53 \\
+child & 0.090/0.45/2.49 & 0.069/0.25/2.01 \\
+eagle & 0.269/1.27/1.77 & 0.218/0.31/0.87 \\
+Johanneskirche$^\dagger$ & 0.159/1.10/1.64 & 0.133/0.58/1.60 \\
+obama$^\dagger$ & 0.173/1.10/1.77 & 0.129/0.80/1.76 \\
+Sanfrancisco & 0.340/3.85/1.23 & 0.305/1.91/1.32 \\
+waterfall & 0.260/1.04/0.72 & 0.218/0.51/0.80 \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+On the original eight, scored as a worked example, an LSD line map that is not in the cost gives the full model 1.26 (0.54) crossings per 100 seam pixels against 1.45 (0.73) for classic at 75\% width, a 13\% drop versus 72\% on the Hough map, and it is lower on only four of eight images.
+At the same width, forward energy alone is already 1.28 (0.55) and adding the line map leaves the score at 1.27 (0.53).
+At 50\% width the full model is higher on Sanfrancisco and waterfall and lower on the other six, including brick\_house and obama by 0.002 and 0.007.
+The line term therefore mostly steers seams away from Hough-detected lines, and this eight-image check does not show that it protects lines in general or that the picture looks better.
+
+\begin{table}[t]
+\centering
+\caption{Seeded sample of 30 RetargetMe images at 75\% width, seed 604. Johanneskirche and \texttt{obama} were not drawn, so this headline is all 30 images and is not Table~\ref{tab:width75}. Entries are mean (sample standard deviation). Saliency is the fraction of spectral-residual mass deleted. Hough and LSD are crossings per 100 seam pixels. The Hough column reuses the map in the cost. The LSD column does not.}
+\label{tab:n30}
+\scriptsize
+\begin{tabular}{lccc}
+\toprule
+Method & Saliency & Hough & LSD \\
+\midrule
+Classic & 0.118 (0.037) & 1.70 (1.45) & 1.08 (0.93) \\
+Forward only & 0.121 (0.035) & 2.07 (1.75) & 1.35 (1.37) \\
+Forward + saliency & 0.091 (0.032) & 1.87 (1.75) & 1.42 (1.51) \\
+Forward + lines & 0.122 (0.036) & 0.94 (0.75) & 1.16 (0.94) \\
+Full model & 0.093 (0.031) & 1.03 (0.86) & 1.26 (1.10) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:n30} is that sample.
+The full model is lower than classic on the LSD score for 12 images, higher for 17, and tied for one.
+A two-sided exact sign test on the 29 non-ties gives $p = 0.46$.
+Adding the line weight to forward energy is lower on 16 images, higher on 13, and tied on one ($p = 0.71$).
+The eight-image LSD drop does not recur.
+The mean for the line weight is lower than forward energy alone, 1.16 against 1.35, but the per-image signs do not support that as a general benefit, and both standard deviations are about as large as the means.
+On the Hough map, which is still inside the cost, the same 30 images still move: classic 1.70 (1.45) against the full model 1.03 (0.86), and forward energy 2.07 (1.75) against 0.94 (0.75) with the line weight.
+That Hough drop is the circular score.
+On spectral-residual saliency the reduction holds.
+Classic is 0.118 (0.037) and the full model is 0.093 (0.031), lower on all 30 images (two-sided sign test $p = 1.86 \times 10^{-9}$).
+Forward energy alone is 0.121 (0.035), and forward plus the saliency weight is 0.091 (0.032).
 
 The weights were chosen on Johanneskirche and \texttt{obama}.
 Dropping those two and averaging the other six, at 75\% width, leaves the same separation: classic 0.096 and 1.45, forward 0.095 and 1.19, saliency only 0.074 and 1.01, lines only 0.095 and 0.28, full model 0.075 and 0.33, again as saliency fraction and line crossings.
@@ -338,7 +419,10 @@ At 50\% width the sheets suggest less bending in the church window and in the ch
 Those sheets are small, and this paper does not treat that impression as a measurement.
 \texttt{Sanfrancisco} is a failure under both seam methods: the heart is curved, the Hough map does not guard it, and both pinch it.
 The crop cuts it off, and scaling keeps it by squeezing the frame.
+\texttt{obama} also degrades under every method at 50\% width, because that scene is packed with content.
 Figure~\ref{fig:hybrid} is the same 50\% width with the hybrid schedule added.
+Figure~\ref{fig:hybridall} is the full eight-image hybrid sheet.
+The hybrid method is judged by eye only, with no scores.
 The hybrid column is the 75\% seam result scaled down to half width.
 It does not receive the extra seams that, under the full model, continue from 75\% to 50\% and cut the heart further.
 It is also not the scaled original: the first 25\% of seams have already narrowed the sculpture relative to uniform scaling.
@@ -353,7 +437,7 @@ Seam insertion spends the extra width on the background by writing averaged copi
 A 25\% width cut takes about 11\,s for classic seams and about 14\,s for the forward variants.
 Scaling and cropping finish in well under 0.01\,s.
 The maps are computed once per call, so they do not explain the differences among the forward rows in Table~\ref{tab:width75}.
-Those differences sit inside the run-to-run spread of a single timing per image.
+Those differences sit inside the standard deviation across the eight images. Each image was timed once, so that spread is not a repeat of the same image.
 The steadier gap is between classic seams and any forward recurrence, which is recomputed on every seam.
 
 \begin{figure*}[t]
@@ -415,18 +499,115 @@ Optional panels show the saliency map, the vertical-seam line map, and the next 
 Three examples are wired to the roles above: Johanneskirche for lines, obama for a person, and Sanfrancisco for the busy failure.
 A useful order in a presentation is to raise $w_l$ on the church, compare classic and the full model on the portrait, and then set the street scene to 50\% width and say plainly what every method loses.
 
+\subsection{Learned saliency comparison}
+The learned map is U$^2$-Net-small, loaded through \texttt{rembg} as the \texttt{u2netp} checkpoint \cite{qin2020u2net}.
+It is pretrained. We did not train it.
+Its output is near-binary, so in the seam cost it acts like a mask.
+The spectral default remains $w_s = 0.5$ and $w_l = 0.8$.
+For the learned source, $w_l = 0.8$ and $w_s = 0.25$.
+That $0.25$ was the smallest of the five weights $\{0.25, 0.5, 1, 2, 4\}$ tested on Johanneskirche and \texttt{obama} only.
+Every tested weight put the learned-mass fraction below half the forward-only value on both images, and the fraction of seam pixels above $0.5$ on the learned map was 0 at every tested weight.
+\texttt{obama} is one of the two tuning images, and its learned map marks the car door rather than the people, so this weight is not evidence that people are protected.
+Ours learned always includes the line weight.
+It is compared with forward plus lines and with ours spectral, which also use $w_l = 0.8$.
+It is not compared with forward-only, because that comparison confounds the line weight.
+Ours learned uses $w_s = 0.25$ and ours spectral uses $w_s = 0.5$, so the comparison is also not a pure swap of the map.
+Each source is expected to score better under its own map.
+On the 30-image sample, ours spectral scores 0.093 (0.031) under the spectral map and 0.179 (0.138) under the learned map.
+Ours learned scores 0.144 (0.052) under the spectral map and 0.030 (0.053) under the learned map.
+Against ours spectral under the spectral map, ours learned is lower on 0 images, higher on 30, and tied on 0 ($p = 1.86 \times 10^{-9}$). This does not show that learned-chosen seams are better on this map. Against ours spectral under the learned map, ours learned is lower on 30 images, higher on 0, and tied on 0 ($p = 1.86 \times 10^{-9}$). The sign test favors ours learned on this map. Against forward + lines under the spectral map, ours learned is lower on 11 images, higher on 19, and tied on 0 ($p = 0.2005$). This does not show that learned-chosen seams are better on this map. Against forward + lines under the learned map, ours learned is lower on 30 images, higher on 0, and tied on 0 ($p = 1.86 \times 10^{-9}$). The sign test favors ours learned on this map.
+Tables~\ref{tab:learned8} and~\ref{tab:learned30} are the 75\% width cross-evaluation.
+Table~\ref{tab:learned850} is the same six methods on the original eight at 50\% width.
+The earlier full sheets are Figures~\ref{fig:all75} and~\ref{fig:all50}.
+The same eight images with ours spectral and ours learned are Figures~\ref{fig:learnedall75} and~\ref{fig:learnedall50}.
+The 30-image sample is Figures~\ref{fig:n30a} and~\ref{fig:n30b}, in alphabetical order.
+Those sheets are impressions, not measurements, and the images were not selected by outcome.
+Figure~\ref{fig:learnedsf} is \texttt{Sanfrancisco} at 50\% width, and Figure~\ref{fig:learnedset} is \texttt{brick\_house}, \texttt{child}, and \texttt{obama} at the same width.
+Both are impressions, not measurements.
+Blob is the fraction of seam pixels whose learned-map value is above 0.5.
+\begin{table*}[t]
+\centering
+\caption{Original eight at 75\% width. Spectral and Learned are fractions of that map deleted. Hough and LSD are crossings per 100 seam pixels. Blob is the fraction of seam pixels with learned value above 0.5. Ours learned uses $w_s = 0.25$ and $w_l = 0.8$. Ours spectral uses $w_s = 0.5$ and $w_l = 0.8$.}
+\label{tab:learned8}
+\scriptsize
+\begin{tabular}{lccccc}
+\toprule
+Method & Spectral & Learned & Hough & LSD & Blob \\
+\midrule
+Classic & 0.089 (0.045) & 0.192 (0.155) & 1.30 (1.25) & 1.45 (0.73) & 0.120 (0.135) \\
+Forward only & 0.089 (0.039) & 0.196 (0.172) & 1.14 (1.18) & 1.28 (0.55) & 0.141 (0.182) \\
+Forward + lines & 0.089 (0.040) & 0.212 (0.212) & 0.31 (0.22) & 1.27 (0.53) & 0.157 (0.207) \\
+Ours spectral & 0.068 (0.036) & 0.210 (0.225) & 0.37 (0.31) & 1.26 (0.54) & 0.159 (0.219) \\
+Learned saliency only & 0.114 (0.081) & 0.005 (0.008) & 2.16 (3.05) & 1.02 (0.65) & 0.002 (0.005) \\
+Ours learned & 0.118 (0.086) & 0.005 (0.009) & 0.94 (1.46) & 0.98 (0.62) & 0.002 (0.005) \\
+\bottomrule
+\end{tabular}
+\end{table*}
+\begin{table*}[t]
+\centering
+\caption{Seeded 30-image sample at 75\% width, seed 604. Johanneskirche and \texttt{obama} were not drawn. Columns match Table~\ref{tab:learned8}. Ours learned is not claimed to be better unless the sign tests say so.}
+\label{tab:learned30}
+\scriptsize
+\begin{tabular}{lccccc}
+\toprule
+Method & Spectral & Learned & Hough & LSD & Blob \\
+\midrule
+Classic & 0.118 (0.037) & 0.167 (0.108) & 1.70 (1.45) & 1.08 (0.93) & 0.156 (0.191) \\
+Forward only & 0.121 (0.035) & 0.184 (0.119) & 2.07 (1.75) & 1.35 (1.37) & 0.174 (0.205) \\
+Forward + lines & 0.122 (0.036) & 0.183 (0.129) & 0.94 (0.75) & 1.16 (0.94) & 0.171 (0.211) \\
+Ours spectral & 0.093 (0.031) & 0.179 (0.138) & 1.03 (0.86) & 1.26 (1.10) & 0.172 (0.212) \\
+Learned saliency only & 0.145 (0.054) & 0.029 (0.052) & 2.27 (2.03) & 1.29 (1.37) & 0.052 (0.132) \\
+Ours learned & 0.144 (0.052) & 0.030 (0.053) & 1.17 (0.98) & 1.10 (0.96) & 0.053 (0.137) \\
+\bottomrule
+\end{tabular}
+\end{table*}
+\begin{table*}[t]
+\centering
+\caption{Original eight at 50\% width. Same columns and weights as Table~\ref{tab:learned8}.}
+\label{tab:learned850}
+\scriptsize
+\begin{tabular}{lccccc}
+\toprule
+Method & Spectral & Learned & Hough & LSD & Blob \\
+\midrule
+Classic & 0.222 (0.097) & 0.377 (0.225) & 1.61 (1.34) & 1.47 (0.60) & 0.127 (0.116) \\
+Forward only & 0.231 (0.087) & 0.395 (0.240) & 1.56 (1.28) & 1.33 (0.53) & 0.142 (0.138) \\
+Forward + lines & 0.224 (0.097) & 0.403 (0.301) & 0.63 (0.48) & 1.28 (0.50) & 0.147 (0.156) \\
+Ours spectral & 0.186 (0.090) & 0.400 (0.314) & 0.69 (0.56) & 1.29 (0.52) & 0.147 (0.164) \\
+Learned saliency only & 0.288 (0.183) & 0.037 (0.046) & 2.50 (3.01) & 1.25 (0.64) & 0.011 (0.018) \\
+Ours learned & 0.285 (0.179) & 0.048 (0.044) & 1.58 (1.98) & 1.21 (0.60) & 0.015 (0.018) \\
+\bottomrule
+\end{tabular}
+\end{table*}
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_learned_sf50.png}
+\caption{\texttt{Sanfrancisco} at 50\% width. Columns are the original, uniform scale, classic seams, ours spectral, and ours learned. Any impression that the heart is preserved is not a measurement.}
+\label{fig:learnedsf}
+\end{figure*}
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{fig_learned_50_set.png}
+\caption{\texttt{brick\_house}, \texttt{child}, and \texttt{obama} at 50\% width, with the same columns as Figure~\ref{fig:learnedsf}. These sheets are impressions, not measurements. The \texttt{obama} learned map marks the car door rather than the people.}
+\label{fig:learnedset}
+\end{figure*}
+
 \subsection{Limitations}
-The saliency and line scores reuse the maps inside the cost.
+The saliency score and the Hough line score reuse the maps inside the cost.
 A lower score shows that the corresponding weight changed the seam.
 It does not show that the deleted pixels were less important to a viewer, and pushing seams off those maps can tear texture that neither map marks.
-No second saliency model, no independent line detector, and no summed forward-energy of the chosen seams is reported, so that tradeoff is not measured.
-Spectral residual saliency responds strongly to edges.
-It is not a subject detector.
+A pretrained saliency model is reported as an optional comparison. No summed forward-energy of the chosen seams is reported.
+One independent check is reported: the same seams are counted on an LSD line map that is not in the cost.
+On the original eight that score moves much less than the Hough score.
+On the seeded 30 it does not favor the full model over classic seams, and the line weight does not win a sign test against forward energy.
+Spectral residual saliency responds strongly to edges and is not a subject detector. The optional learned comparison is a pretrained salient-object model \cite{qin2020u2net}.
 The line map only contains segments the Hough transform returns, so short and curved structures, including the heart sculpture, are unprotected except where the residual happens to be high.
 A strong-edge penalty does not fix that curve: the seam pays it at the crossing and then follows the cheap interior.
 The hybrid schedule stops further seam cuts after 75\%, which is not the same as protecting the object during the first 25\%.
-The weights were chosen on two of the eight test images, and they were not swept.
-The line-score standard deviation is about as large as the classic mean, and $n=8$ is a small slice of RetargetMe.
+The spectral weights were chosen on two of the eight test images, and they were not swept.
+Those two were not in the 30-image draw.
+The line-score standard deviation is about as large as the mean on both the eight and the 30.
+Thirty images is still not the full RetargetMe set.
 The comparison does not include the published RetargetMe operators, such as multi-operator search, shift-map, or warping.
 Hybrid is a fixed seam-then-scale schedule, not that search.
 The height cut and the enlargement are single images.
@@ -437,15 +618,22 @@ There is no user study.
 The operator is forward-energy seam carving plus a spectral-residual term and an orientation-weighted line term.
 On eight RetargetMe images, turning the terms off one at a time moves two different scores, and both scores are built from the maps in the cost.
 The saliency weight lowers deleted residual mass from 0.089 to 0.068.
-The line weight lowers line-map crossings from 1.14 to 0.31 per 100 seam pixels.
-The full model keeps the saliency-score reduction and most, not all, of the line-score reduction: its line score is 0.37 rather than 0.31.
-The same direction remains if the two images used to pick the weights are left out of the average.
-That is evidence that the weights do what they were built to do.
+On the seeded 30 images the full model is lower than classic on that fraction for every image, 0.093 (0.031) against 0.118 (0.037).
+The line weight lowers Hough-map crossings from 1.14 to 0.31 per 100 seam pixels.
+The full model keeps the saliency-score reduction and most, not all, of that Hough reduction: its Hough score is 0.37 rather than 0.31.
+Leaving out the two images used to pick the weights does not remove that Hough and saliency separation on the other six.
+That is evidence that those weights move the maps they were built from.
+On the original eight, an LSD map that is not in the cost puts the full model only about 13\% below classic seams, and only on four of the eight images, and adding the line weight to forward energy does not lower that score.
+On the seeded sample of 30 the LSD mean goes the other way, 1.26 against 1.08, and the sign tests do not show a benefit ($p = 0.46$ for the full model against classic, $p = 0.71$ for the line weight against forward energy).
+The Hough score on those 30 images still falls, which is what a map inside the cost is expected to do.
 It is not evidence that the results look better, that subjects are preserved, or that the method beats other published retargeting operators.
 Scaling and cropping are the simple baselines.
 A large reduction of a busy curved scene still damages the content.
 Stopping the seams at 75\% and scaling the rest removes only the extra damage that comes from carving on to half width.
 It does not put the curved sculpture back to the shape that uniform scaling keeps.
+On the learned comparison, each source wins under its own map.
+The one fair comparison, ours learned against forward plus lines under the spectral map, is not significant ($p = 0.20$).
+By eye, the learned map kept the heart on \texttt{Sanfrancisco} and squeezed the man on \texttt{obama}.
 
 {
 \small
@@ -493,6 +681,35 @@ No public repository link is attached.
 \label{fig:hybridall}
 \end{figure}
 
+\section{Learned comparison sheets}
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth,height=0.78\textheight,keepaspectratio]{fig_learned_all50.png}
+\caption{All eight original images at 50\% width, in the same order as Figures~\ref{fig:all75} and~\ref{fig:all50}. Columns are the original, uniform scale, classic seams, ours spectral, and ours learned. These are impressions, not measurements. The images were not selected by outcome.}
+\label{fig:learnedall50}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth,height=0.78\textheight,keepaspectratio]{fig_learned_all75.png}
+\caption{All eight original images at 75\% width. Columns match Figure~\ref{fig:learnedall50}. These are impressions, not measurements. The images were not selected by outcome.}
+\label{fig:learnedall75}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth,height=0.78\textheight,keepaspectratio]{fig_n30_overview_a.png}
+\caption{First 15 images of the seed-604 sample at 75\% width, alphabetical order. Columns are the original, classic seams, ours spectral, and ours learned. These are impressions, not measurements. The images were not selected by outcome.}
+\label{fig:n30a}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth,height=0.78\textheight,keepaspectratio]{fig_n30_overview_b.png}
+\caption{Remaining 15 images of the seed-604 sample at 75\% width, continuing the alphabetical order of Figure~\ref{fig:n30a}. Columns match that figure. These are impressions, not measurements. The images were not selected by outcome.}
+\label{fig:n30b}
+\end{figure}
+
 \section{Source code}
 The listings below are the program submitted with this report.
 They match the source included with this submission.
@@ -513,6 +730,9 @@ They match the source included with this submission.
 \lstinputlisting[caption={experiments/download_retargetme.py}]{../experiments/download_retargetme.py}
 \lstinputlisting[caption={experiments/run_experiments.py}]{../experiments/run_experiments.py}
 \lstinputlisting[caption={experiments/run_hybrid.py}]{../experiments/run_hybrid.py}
+\lstinputlisting[caption={experiments/report_numbers.py}]{../experiments/report_numbers.py}
+\lstinputlisting[caption={experiments/score_lsd.py}]{../experiments/score_lsd.py}
+\lstinputlisting[caption={experiments/run_n30.py}]{../experiments/run_n30.py}
 \endgroup
 
 \end{document}

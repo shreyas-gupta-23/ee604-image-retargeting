@@ -10,7 +10,7 @@ Replace the name line before presenting. The GitHub URL in the last slide is sti
 
 EE604 course project. Names and roll numbers.
 
-Notes: One sentence. We change an image's height and width without a learned model. The rest of the talk is the cost we put on a seam, then the pictures.
+Notes: One sentence. We change an image's height and width. The default cost has no learned weights. A pretrained saliency model is only an optional comparison. The rest of the talk is the cost we put on a seam, then the pictures.
 
 ## 2. Problem statement
 
@@ -132,4 +132,4 @@ Be ready to open `src/seam.py` at `forward_seam` and `src/energy.py` at `line_pr
 
 **Contributions.** Each person states their own block from the appendix of the report: maps, dynamic program, experiments, demo, or writing.
 
-**Links.** RetargetMe. OpenCV, NumPy, Gradio. Repository: `https://github.com/YOUR_USERNAME/ee604-image-retargeting` (replace).
+**Links.** RetargetMe. OpenCV, NumPy, Gradio. Repository: `https://github.com/shreyas-gupta-23/ee604-image-retargeting`
