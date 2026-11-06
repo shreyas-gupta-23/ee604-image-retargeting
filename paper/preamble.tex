@@ -8,6 +8,16 @@
 \usepackage{placeins}
 \usepackage{float}
 
+% Keep several full-width floats stacked, instead of stretching the gaps to fill the page.
+\makeatletter
+\setlength{\@dblfptop}{8pt}
+\setlength{\@dblfpsep}{12pt}
+\setlength{\@dblfpbot}{0pt plus 1fil}
+\makeatother
+
+% Do not stretch headings and floats to fill a short column or page.
+\raggedbottom
+
 \lstset{
   language=Python,
   basicstyle=\ttfamily\scriptsize,
