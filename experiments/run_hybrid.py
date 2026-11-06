@@ -1,7 +1,4 @@
-"""50% width: full seam carve versus seams down to 75%, then scale.
-
-Also checks that a 75% target makes hybrid identical to the full model.
-"""
+"""At 50% width we compare a full carve with seams stopped at 75% and then scaled. A 75% target has to match the full model, or we do not trust the run."""
 
 from __future__ import annotations
 

@@ -1,10 +1,9 @@
-"""w_s sweep for learned saliency on Johanneskirche and obama only.
+"""The w_s sweep for learned saliency, on Johanneskirche and obama only.
 
-Selection rule, fixed before the numbers are read:
-the smallest w_s in {0.25, 0.5, 1.0, 2.0, 4.0} at which the learned-mass
-fraction is below half of the forward-only learned-mass fraction on both
-images, unless that carved image shows visible tearing, in which case take
-the next lower value. w_l stays 0.8. This script does not apply the rule.
+We fixed the rule before reading the numbers: take the smallest w_s in
+{0.25, 0.5, 1.0, 2.0, 4.0} that puts the learned-mass fraction under half
+of the forward-only value on both images. If that carve tears, we take the
+next lower value. We keep w_l at 0.8. This script does not apply the rule.
 """
 
 from __future__ import annotations

@@ -1,4 +1,4 @@
-"""Unattended learned-saliency run. Does not overwrite metrics.csv, metrics_n30.csv, or main.tex."""
+"""The unattended learned-saliency run. We chose not to overwrite metrics.csv, metrics_n30.csv, or main.tex."""
 
 from __future__ import annotations
 

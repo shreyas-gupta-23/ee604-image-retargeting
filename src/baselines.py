@@ -1,4 +1,4 @@
-"""Uniform scaling and center-crop baselines."""
+"""Uniform scaling and center-crop. We use these as baselines that ignore seam cost."""
 
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def center_crop_resize(image: np.ndarray, target_h: int, target_w: int) -> np.nd
 
 
 def limit_long_side(image: np.ndarray, max_side: int = 640) -> np.ndarray:
-    """Shrink so the long side is at most ``max_side``. Never enlarges."""
+    """We shrink so the long side is at most ``max_side``. We never enlarge here."""
     height, width = image.shape[:2]
     long_side = max(height, width)
     if long_side <= max_side:

@@ -1,10 +1,6 @@
 """Vertical-seam dynamic programs, removal, and insertion.
 
-A horizontal seam is a vertical seam on the transposed image. The caller
-owns that transpose so saliency and line maps stay aligned.
-
-Forward energy follows Rubinstein, Shamir, and Avidan (SIGGRAPH 2008).
-Backward energy follows Avidan and Shamir (SIGGRAPH 2007).
+We run a horizontal seam by transposing the image and using this same code. We use Rubinstein's 2008 forward energy, and Avidan and Shamir's 2007 backward energy for the classic baseline.
 """
 
 from __future__ import annotations
@@ -33,8 +29,7 @@ def backward_seam(energy: np.ndarray) -> tuple[np.ndarray, float]:
         from_left[1:] = previous[:-1]
         from_right[-1] = np.inf
         from_right[:-1] = previous[1:]
-        # 0 = from j-1, 1 = from j, 2 = from j+1. Up is the starting choice.
-        which = np.ones(width, np.int8)
+        which = np.ones(width, np.int8)  # 0 from j-1, 1 from j, 2 from j+1
         best = previous + 0.0
         better = from_left < best
         best = np.where(better, from_left, best)
@@ -49,20 +44,7 @@ def backward_seam(energy: np.ndarray) -> tuple[np.ndarray, float]:
 
 
 def forward_seam(lum: np.ndarray, pixel_cost: np.ndarray) -> tuple[np.ndarray, float]:
-    """Minimum seam under forward energy plus a per-pixel cost.
-
-    Removing pixel ``(i, j)`` joins its left and right neighbors. The new
-    edge, and the edge against the pixel the seam just left, is:
-
-        C_U(i, j) = |I(i, j+1) - I(i, j-1)|
-        C_L(i, j) = C_U(i, j) + |I(i-1, j) - I(i, j-1)|
-        C_R(i, j) = C_U(i, j) + |I(i-1, j) - I(i, j+1)|
-
-    ``C_L``, ``C_U``, and ``C_R`` are the costs of arriving from ``(i-1, j-1)``,
-    ``(i-1, j)``, and ``(i-1, j+1)``. The stored cost adds ``pixel_cost``,
-    which carries saliency and line protection. Out-of-range neighbors are
-    clamped to the border pixel; a step that would leave the image is ``inf``.
-    """
+    """Forward energy plus ``pixel_cost``. We use the arrival costs C_U, C_L, and C_R, and we treat a step that leaves the image as infinite."""
     height, width = lum.shape
     cumulative = np.zeros((height, width), np.float64)
     step = np.zeros((height, width), np.int8)
@@ -117,7 +99,7 @@ def vertical_seam(image: np.ndarray, saliency: np.ndarray, lines: np.ndarray,
 
 
 def remove_vertical_seam(array: np.ndarray, seam: np.ndarray) -> np.ndarray:
-    """Drop one pixel per row. Works for ``HxW``, ``HxWxC``, and index maps."""
+    """We drop one pixel per row. This works for ``HxW``, ``HxWxC``, and index maps."""
     height, width = array.shape[:2]
     keep = np.ones((height, width), dtype=bool)
     keep[np.arange(height), seam] = False
@@ -127,7 +109,7 @@ def remove_vertical_seam(array: np.ndarray, seam: np.ndarray) -> np.ndarray:
 
 
 def insert_vertical_seams(image: np.ndarray, seams: list[np.ndarray]) -> np.ndarray:
-    """Duplicate each recorded seam pixel, averaged with its right neighbor.
+    """We duplicate each recorded seam pixel and average it with its right neighbor.
 
     ``seams`` stores column indices into ``image`` itself (the picture before
     insertion), one array of length ``H`` per seam. Seams must not reuse a pixel.

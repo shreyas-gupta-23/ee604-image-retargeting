@@ -1,10 +1,4 @@
-"""Scores collected while seams are chosen.
-
-Saliency mass is the sum of the spectral-residual map on pixels that are
-actually deleted. Line crossings count seam pixels that land on a positive
-line-protection value, reported per 100 seam pixels. Scale and crop do not
-choose seams, so those two scores are left unset for them.
-"""
+"""Seam scores. We measure saliency as deleted map mass over total mass, and lines as hits per 100 seam pixels. Scale and crop have neither score, so we leave both unset."""
 
 from __future__ import annotations
 
@@ -38,7 +32,7 @@ def line_crossings_per_100(counts: dict) -> float:
 
 
 def lsd_crossings_per_100(counts: dict) -> float:
-    """Seam pixels on the LSD map, per 100 seam pixels. Not used to choose seams."""
+    """Seam pixels on the LSD map, per 100 seam pixels. We use this as a check. We did not use it to choose seams."""
     pixels = int(counts["seam_pixels"])
     if pixels <= 0:
         return 0.0

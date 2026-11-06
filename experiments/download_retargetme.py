@@ -1,9 +1,4 @@
-"""Download the RetargetMe source-image archive and keep a small subset.
-
-The archive is the public "source images only" zip linked from
-http://people.csail.mit.edu/mrub/retargetme/download.html
-Full images are not committed; this script fetches them.
-"""
+"""We download the RetargetMe source-image zip and keep eight images. We do not commit the zip itself."""
 
 from __future__ import annotations
 
@@ -21,8 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEST = ROOT / "experiments" / "retargetme"
 ZIP_PATH = ROOT / "experiments" / "retargetme_source.zip"
 
-# Eight source images: people, buildings, an animal, an object, a landscape,
-# and a street scene. Names are the stems published in the RetargetMe archive.
+# We chose these stems from the RetargetMe archive: people, buildings, an animal, an object, a landscape, and a street.
 KEEP = (
     "obama.png",
     "child.png",

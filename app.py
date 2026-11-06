@@ -1,13 +1,4 @@
-"""Interactive demo for spatial-domain image retargeting.
-
-Upload an image, pick a target size as a percent of the working resolution,
-and compare uniform scaling, center-crop, classic seam carving, the
-combined forward energy, and a hybrid that stops seams at 75% width
-and scales the rest. The long side is capped at 640 px so the dynamic
-program stays responsive. Weights w_s and w_l are the saliency and
-line-protection multipliers. Hybrid uses that same cost, stops seams
-at 75% of the original side, and scales anything beyond that.
-"""
+"""Gradio demo. We compare scale, crop, classic seams, forward energy, and hybrid. We cap the long side at 640 px so a result can be recomputed on request. ``w_s`` and ``w_l`` are the saliency and line weights."""
 
 from __future__ import annotations
 
@@ -37,7 +28,7 @@ def _find_named(stem: str) -> Path | None:
 
 
 def example_paths() -> list[str]:
-    """Prefer the line, saliency, and failure images chosen by the experiments."""
+    """We prefer the line, saliency, and failure images we chose for the experiments."""
     ordered: list[Path] = []
     if ROLES_PATH.exists():
         roles = {}

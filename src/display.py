@@ -1,4 +1,4 @@
-"""RGB overlays for the demo and the experiment figures."""
+"""RGB overlays. We use these in the demo and in the experiment figures."""
 
 from __future__ import annotations
 

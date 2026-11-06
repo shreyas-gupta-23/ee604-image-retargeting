@@ -1,11 +1,4 @@
-"""Seeded 30-image check at 75% width, with LSD scored in the same run.
-
-Figures are not written. The original eight stay in metrics.csv. This script
-writes experiments/results/metrics_n30.csv.
-
-Before any new image is trusted, the original eight are carved again at 75%
-width. Their saliency fraction and Hough line score must match metrics.csv.
-"""
+"""A seed-604 sample of 30 images at 75% width. We score LSD in the same carve. We trust a new image only after the original eight still match metrics.csv."""
 
 from __future__ import annotations
 
@@ -227,14 +220,14 @@ def write_csv(rows: list[dict]) -> None:
 
 
 def print_learned_reports() -> None:
-    """Cross-evaluation of the learned-saliency CSVs. Does not carve."""
+    """Cross-evaluation of the learned-saliency CSVs. We do not carve again here."""
     from report_numbers import format_learned_report
 
     print(format_learned_report(), flush=True)
 
 
 def summary_from_csv() -> None:
-    """Rewrite n30_summary.txt from metrics_n30.csv. Does not carve."""
+    """We rewrite n30_summary.txt from metrics_n30.csv. We do not carve again here."""
     with OUT_CSV.open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     sample = []

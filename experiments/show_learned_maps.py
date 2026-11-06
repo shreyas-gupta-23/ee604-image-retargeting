@@ -1,6 +1,6 @@
-"""Spectral residual beside U2-Net-small on the four inspection images.
+"""Spectral residual beside U2-Net-small on the four images we inspected.
 
-Does not carve seams. Writes experiments/results/fig_learned_maps.png.
+We do not carve seams here. We write experiments/results/fig_learned_maps.png.
 """
 
 from __future__ import annotations

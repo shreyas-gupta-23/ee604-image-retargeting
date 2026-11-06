@@ -1,13 +1,4 @@
-"""Add an LSD line score to metrics.csv without rewriting the other columns.
-
-Seam selection is unchanged: the cost still uses spectral-residual saliency
-and the Hough line map. The LSD map is carried only so the same deleted
-pixels can be counted against a detector that was not in the cost.
-
-For every existing classic / forward / +saliency / +lines / full row, the
-saved saliency fraction and Hough line score must match this run. Rows that
-were not in the CSV (the 50% forward ablations) are appended.
-"""
+"""We add an LSD score to metrics.csv. We do not change the cost. If the saved saliency or Hough scores do not match, we stop."""
 
 from __future__ import annotations
 

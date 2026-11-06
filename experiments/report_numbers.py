@@ -1,9 +1,4 @@
-"""Print the numbers quoted in the write-up from the saved experiment CSV.
-
-Reads ``experiments/results/metrics.csv``. Does not rerun seam carving.
-The sample standard deviation is the n-1 definition. Hybrid is not scored
-here: the write-up judges that schedule by eye only.
-"""
+"""Print the write-up numbers from the saved CSVs. We do not carve here. We use the sample standard deviation with n-1. We chose not to score the hybrid."""
 
 from __future__ import annotations
 
@@ -16,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CSV_PATH = ROOT / "experiments" / "results" / "metrics.csv"
 N30_PATH = ROOT / "experiments" / "results" / "metrics_n30.csv"
 
-# The two images used to choose w_s and w_l. The check drops both.
+# We chose w_s and w_l on these two images. The check drops both.
 TUNING = ("Johanneskirche", "obama")
 
 WIDTH_75 = (
@@ -107,7 +102,7 @@ def print_per_image(rows) -> None:
 
 
 def print_lsd(rows) -> None:
-    """LSD crossings per 100 seam pixels. The map is not inside the cost."""
+    """LSD crossings per 100 seam pixels. We kept this map out of the cost."""
     if not rows or "lsd_crossings_per_100" not in rows[0]:
         print("\nlsd column is not in the csv")
         return
@@ -266,7 +261,7 @@ def _learned_rows(path: Path) -> list[dict[str, str]]:
 
 
 def analyze_learned(rows: list[dict[str, str]], setting: str, skip: tuple[str, ...] = ()) -> tuple[str, dict]:
-    """Mean table and sign tests. Lower is better. Text is the paper source."""
+    """The mean table and the sign tests. Lower is better. We wrote this text so it could go into the paper."""
     names = []
     for row in rows:
         if row["setting"] == setting and row["image"] not in names and row["image"] not in skip:

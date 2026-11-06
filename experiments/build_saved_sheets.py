@@ -1,4 +1,4 @@
-"""Contact sheets from saved PNGs. Does not carve."""
+"""Contact sheets from the PNGs we already saved. We do not carve again."""
 
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def check_png(name: str, setting: str, method: str, targets: dict) -> np.ndarray
 
 
 def fit_panel(image: np.ndarray, title: str) -> np.ndarray:
-    """Same 168-pixel panels and 26-pixel labels as the eight-image sheets."""
+    """We keep the same 168-pixel panels and 26-pixel labels as the eight-image sheets."""
     height, width = image.shape[:2]
     new_w = max(1, int(round(width * (168 / float(height)))))
     resized = cv2.resize(image, (new_w, 168), interpolation=cv2.INTER_AREA)

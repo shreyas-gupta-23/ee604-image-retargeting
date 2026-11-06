@@ -1,9 +1,4 @@
-"""Compare scale, crop, classic seams, and the combined energy.
-
-Writes a CSV, a text summary, and OpenCV contact sheets. Images are the
-RetargetMe subset in ``experiments/retargetme``. The long side is capped
-at 640 px before any method runs.
-"""
+"""We compare scale, crop, classic seams, and our model on the eight RetargetMe images. This writes the CSV and the contact sheets. We cap the long side at 640 px."""
 
 from __future__ import annotations
 
@@ -43,7 +38,7 @@ WEIGHTS = {
     "crop": (0.0, 0.0),
 }
 SEAM_METHODS = {"classic", "ours", "forward", "forward_saliency", "forward_lines"}
-# Contact sheets stay on this set. A larger CSV run must not draw every image.
+# We keep the contact sheets on this set. We chose not to draw every image when a CSV run is larger.
 PAPER_FIGURES = (
     "brick_house",
     "butterfly",
@@ -149,7 +144,7 @@ def contact_sheet(records: list[tuple[str, list[tuple[str, np.ndarray]]]]) -> np
     rows = []
     for row_title, panels in records:
         tiles = [fit_panel(image, title) for title, image in panels]
-        # A narrow name tag on the left of the row.
+        # We put a narrow name tag on the left of the row.
         tag_h = tiles[0].shape[0]
         tag = np.full((tag_h, 150, 3), 245, np.uint8)
         cv2.putText(tag, row_title[:18], (6, tag_h // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 0), 1, cv2.LINE_AA)
@@ -161,12 +156,7 @@ def contact_sheet(records: list[tuple[str, list[tuple[str, np.ndarray]]]]) -> np
 
 
 def choose_roles(images: dict[str, np.ndarray]) -> dict[str, str]:
-    """Line, saliency, and failure examples used in the paper and the demo.
-
-    Johanneskirche has long vertical mullions, obama is the person, and
-    Sanfrancisco is the busy scene. Other names are used when that subset
-    is not the one on disk.
-    """
+    """The examples we chose for the paper: Johanneskirche for lines, obama for a person, Sanfrancisco for the failure. We fall back if a name is missing."""
     preferred = {
         "lines": "Johanneskirche",
         "saliency": "obama",

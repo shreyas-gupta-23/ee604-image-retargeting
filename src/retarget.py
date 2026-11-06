@@ -1,20 +1,6 @@
-"""Retarget one RGB image to a target height and width.
+"""Retarget one RGB image to an exact height and width.
 
-Methods
--------
-scale
-    Uniform resize.
-crop
-    Center-crop to the target aspect, then resize.
-classic
-    Backward-energy seam carving (gradient magnitude only).
-ours
-    Forward-energy seam carving plus saliency and Hough line protection.
-    ``weights`` is ``(w_s, w_l)``. ``(0, 0)`` is forward energy alone,
-    ``(w_s, 0)`` drops the line term, and ``(0, w_l)`` drops saliency.
-hybrid
-    The same cost as ``ours``. Seams stop once a side reaches 75 percent
-    of its original length. A uniform scale does the rest of a deeper cut.
+We resize for ``scale`` and keep the centered window for ``crop``. ``classic`` is backward energy. For ``ours`` we add saliency and Hough lines to forward energy, with ``weights=(w_s, w_l)``. For ``hybrid`` we use that same cost, stop the seams at 75% of a side, and scale the rest.
 """
 
 from __future__ import annotations
@@ -33,29 +19,17 @@ from .metrics import accumulate_seam, empty_counts
 from .seam import insert_vertical_seams, remove_vertical_seam, vertical_seam
 
 DEFAULT_WEIGHTS = (0.5, 0.8)
-# Learned-source saliency weight. Frozen before any other image is carved.
-# Rule: smallest w_s in {0.25, 0.5, 1, 2, 4} with learned-mass fraction below
-# half the forward-only value on both Johanneskirche and obama, unless that
-# carve is visibly torn, in which case the next lower value. w_l stays 0.8.
-# 0.25 meets the mass rule on both and is not torn. Spectral runs keep
-# DEFAULT_WEIGHTS. Obama's learned map marks the car door, not the people.
+# We chose 0.25 for the learned source only. It was the smallest of {0.25, 0.5, 1, 2, 4} that kept the learned mass under half the forward-only value on Johanneskirche and obama, without a tear. Spectral runs still use DEFAULT_WEIGHTS.
 LEARNED_W_S = 0.25
 LEARNED_W_L = 0.8
-# Seams are allowed to remove at most this fraction of a side.
+# We let the seams remove at most this fraction of a side, then we scale.
 HYBRID_KEEP = 0.75
 
 
 def retarget(image: np.ndarray, target_hw: tuple[int, int], method: str = "ours",
              weights: tuple[float, float] = DEFAULT_WEIGHTS, return_info: bool = False,
              saliency_source: str = "spectral", score_both: bool = False):
-    """Return the retargeted RGB uint8 image.
-
-    When ``return_info`` is true, also return a dict of seam statistics.
-    Statistics are meaningful for ``classic``, ``ours``, and the carved
-    part of ``hybrid``. Scale and crop report an empty seam count.
-    Hybrid line and saliency scores cover only the seams, not the scale
-    that finishes a reduction past 75 percent.
-    """
+    """RGB uint8 image. With ``return_info`` we also return the seam counts. Scale and crop have no seams, and for hybrid we score only the seams we actually cut."""
     rgb = _as_uint8_rgb(image)
     target_h = max(2, int(target_hw[0]))
     target_w = max(2, int(target_hw[1]))
@@ -75,7 +49,7 @@ def retarget(image: np.ndarray, target_hw: tuple[int, int], method: str = "ours"
     mode = "classic" if method == "classic" else "forward"
     height, width = rgb.shape[:2]
     if method == "hybrid":
-        # Same cost as ours. Seams stop at 75% of the original side.
+        # We use the same cost as ours, and we stop the seams at 75% of the original side.
         shrink_h = _hybrid_stop(height, target_h)
         shrink_w = _hybrid_stop(width, target_w)
         detector, w_c = "hough", 0.0
@@ -133,7 +107,7 @@ def protection_maps(image: np.ndarray) -> dict[str, np.ndarray]:
 
 
 def _hybrid_stop(original: int, target: int, keep: float = HYBRID_KEEP) -> int:
-    """Size to reach with seams. A deeper cut is finished by scaling."""
+    """The size we still reach with seams. We finish any deeper cut by scaling."""
     if target >= original:
         return original
     floor = max(2, int(round(original * keep)))
@@ -162,7 +136,7 @@ def _count_mass(counts: dict, key: str, saliency: np.ndarray, seam: np.ndarray) 
 
 
 def _count_blob(counts: dict, saliency: np.ndarray, seam: np.ndarray) -> None:
-    """Seam pixels on learned-map values above 0.5. No-op unless that count was armed."""
+    """Seam pixels whose learned-map value is above 0.5. We skip this unless we armed that count."""
     if "learned_blob_hits" not in counts:
         return
     rows = np.arange(seam.shape[0])
@@ -175,7 +149,7 @@ def _shrink(image, target_h, target_w, mode, w_s, w_l, w_c=0.0, detector="hough"
     saliency = _saliency_for_cost(image, lum, saliency_source)
     line_v = line_protection(lum, "vertical", detector)
     line_h = line_protection(lum, "horizontal", detector)
-    # LSD is a score only. It is not passed into the dynamic program.
+    # We score LSD only. We chose not to pass it into the dynamic program.
     lsd_v = line_protection(lum, "vertical", "lsd")
     lsd_h = line_protection(lum, "horizontal", "lsd")
     curves = curve_protection(lum) if w_c else None
@@ -183,7 +157,7 @@ def _shrink(image, target_h, target_w, mode, w_s, w_l, w_c=0.0, detector="hough"
     counts["saliency_total"] = float(saliency.sum())
     if saliency_source == "learned" or (score_both and saliency_source == "spectral"):
         counts["learned_blob_hits"] = 0
-    # The other map is a score only. It is not passed into the dynamic program.
+    # We score the other saliency map only. We chose not to pass it into the dynamic program.
     other = None
     other_key = None
     if score_both:
@@ -263,7 +237,7 @@ def _shrink(image, target_h, target_w, mode, w_s, w_l, w_c=0.0, detector="hough"
 
 def _enlarge_width(image, target_w, mode, w_s, w_l, w_c=0.0, detector="hough",
                    saliency_source="spectral"):
-    """Record seams by removal, then insert averaged duplicates into ``image``."""
+    """We record seams by removing them, then we insert averaged duplicates back into ``image``."""
     current = image
     total = empty_counts()
     while current.shape[1] < target_w:
@@ -307,8 +281,7 @@ def _record_vertical_seams(image, count, mode, w_s, w_l, w_c=0.0, detector="houg
         seam, _ = vertical_seam(work, saliency, lines, mode, w_s, w_l, curves, w_c)
         rows = np.arange(work.shape[0])
         seams.append(columns[rows, seam].copy())
-        # Path statistics follow the chosen seam. Saliency is not marked as
-        # removed: insertion keeps those pixels and adds a duplicate.
+        # We keep the pixel when we insert a seam, so we do not count that saliency as removed.
         counts["line_hits"] += int(np.count_nonzero(lines[rows, seam] > 0))
         counts["seam_pixels"] += int(seam.shape[0])
         counts["vertical_seams"] += 1
